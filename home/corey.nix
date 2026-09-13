@@ -24,4 +24,19 @@
     btop
     fastfetch
   ];
+
+ # Hyprland
+  wayland.windowManager.hyprland = {
+    enable = true;
+    package = null;
+    configType = "lua";
+    systemd.enable = false;
+
+    extraConfig = ''
+      hl.bind("SUPER + RETURN", hl.dsp.exec_cmd("kitty"))
+      hl.bind("SUPER + Q", hl.dsp.window.close())
+      hl.bind("SUPER + W", hl.dsp.exec_cmd("firefox"))
+      hl.bind("SUPER + SHIFT + E", hl.dsp.exit())
+    '';
+  };
 }
