@@ -10,7 +10,14 @@
       ./hardware-configuration.nix
       ./modules/desktop.nix
       ./modules/packages.nix
+      <home-manager/nixos>
     ];
+  # Home Manager
+  home-manager = {
+    useGlobalPkgs = true;
+    useUserPackages = true;
+    users.corey = import ./home/corey.nix;
+  };
 
   # Use the GRUB 2 boot loader.
   boot.loader.grub.enable = true;
