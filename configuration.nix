@@ -8,6 +8,8 @@
   imports =
     [ # Include the results of the hardware scan.
       ./hardware-configuration.nix
+      ./modules/desktop.nix
+      ./modules/packages.nix
     ];
 
   # Use the GRUB 2 boot loader.
@@ -39,27 +41,6 @@
     layout = "us";
     variant = "";
   };
-
-# Hyprland
-programs.hyprland = {
-  enable = true;
-  withUWSM = true;
-  xwayland.enable = true;
-};
-
-# Graphical login manager
-services.displayManager.sddm = {
-  enable = true;
-  wayland.enable = true;
-};
-
-# Useful Wayland integration
-xdg.portal = {
-  enable = true;
-  extraPortals = with pkgs; [
-    xdg-desktop-portal-hyprland
-  ];
-};
 
   # Define a user account. Don't forget to set a password with ‘passwd’.
   users.users."corey" = {
