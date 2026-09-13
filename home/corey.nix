@@ -39,4 +39,10 @@
       hl.bind("SUPER + SHIFT + E", hl.dsp.exit())
     '';
   };
+
+  xdg.portal = {
+    enable = true;
+    config.common.default ="*";
+  };
+
 }
