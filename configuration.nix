@@ -10,8 +10,10 @@
       ./hardware-configuration.nix
       ./modules/desktop.nix
       ./modules/packages.nix
-      <home-manager/nixos>
     ];
+
+  nix.settings.experimental-features = [ "nix-command" "flakes" ];
+
   # Home Manager
   home-manager = {
     useGlobalPkgs = true;
