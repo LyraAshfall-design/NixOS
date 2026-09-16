@@ -19,6 +19,9 @@
     enable = true;
     systemd.enable = true;
   };
+
+  # Shell
+  programs.fish.enable = true;
   
   # Credential storage
   services.gnome.gnome-keyring.enable = true;
@@ -75,7 +78,7 @@
     isNormalUser = true;
     description = "Corey";
     extraGroups = [ "networkmanager" "wheel" ];
-    packages = with pkgs; [];
+    shell = pkgs.fish;
   };
 
   # Allow unfree packages
