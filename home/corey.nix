@@ -1,9 +1,21 @@
-{pkgs, ...}:
+{pkgs, config, ...}:
 
 {
   home.username = "corey";
   home.homeDirectory = "/home/corey";
   home.stateVersion = "26.05";
+
+ xdg.userDirs = {
+     enable = true;
+     createDirectories = true;
+
+     desktop = "${config.home.homeDirectory}/Desktop";
+     documents = "${config.home.homeDirectory}/Documents";
+     download = "${config.home.homeDirectory}/Downloads";
+     music = "${config.home.homeDirectory}/Music";
+     pictures = "${config.home.homeDirectory}/Pictures";
+   };
+
 
   programs.home-manager.enable = true;
 
@@ -23,6 +35,10 @@
     firefox
     btop
     fastfetch
+    satty
+    gnome-text-editor
+    gnome-calculator
+    hyprpicker
   ];
 
  # Hyprland
@@ -32,24 +48,23 @@
     configType = "lua";
     systemd.enable = false;
 
-    extraConfig = ''
-      hl.monitor({
-        output = "",
-        mode = "1920x1080@60",
-        position = "auto",
-        scale = 1,
-      })
-
-      hl.bind("SUPER + RETURN", hl.dsp.exec_cmd("kitty"))
-      hl.bind("SUPER + Q", hl.dsp.window.close())
-      hl.bind("SUPER + W", hl.dsp.exec_cmd("firefox"))
-      hl.bind("SUPER + SHIFT + E", hl.dsp.exit())
-    '';
+    extraConfig = builtins.readFile ./corey/hypr/hyprland.lua;
   };
+
+ xdg.configFile."hypr/config" = {
+    source = ./corey/hypr/config;
+    recursive = true;
+  };
+
+  xdg.configFile."hypr/xdph.conf".source =
+    ./corey/hypr/xdph.conf;
+
+  xdg.configFile."noctalia/config.toml".source =
+   ./corey/noctalia/config.toml;
 
   xdg.portal = {
     enable = true;
-    config.common.default ="*";
+    config.common.default = "*";
   };
 
 }

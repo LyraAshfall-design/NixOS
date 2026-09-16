@@ -14,6 +14,15 @@
 
   nix.settings.experimental-features = [ "nix-command" "flakes" ];
 
+  # Noctalia
+  programs.noctalia = {
+    enable = true;
+    systemd.enable = true;
+  };
+  
+  # Credential storage
+  services.gnome.gnome-keyring.enable = true;
+
   # Home Manager
   home-manager = {
     useGlobalPkgs = true;
@@ -38,6 +47,16 @@
 
   # Enable networking
   networking.networkmanager.enable = true;
+
+  #SSHD
+  services.openssh = {
+   enable = true;
+   openFirewall = true;
+   settings = {
+     PasswordAuthentication = true;
+     PermitRootLogin = "no";
+   };
+ };
 
   # Set your time zone.
   time.timeZone = "America/Vancouver";
