@@ -33,6 +33,13 @@
     systemd.enable = false;
 
     extraConfig = ''
+      hl.monitor({
+        output = "",
+        mode = "1920x1080@60",
+        position = "auto",
+        scale = 1,
+      })
+
       hl.bind("SUPER + RETURN", hl.dsp.exec_cmd("kitty"))
       hl.bind("SUPER + Q", hl.dsp.window.close())
       hl.bind("SUPER + W", hl.dsp.exec_cmd("firefox"))
