@@ -1,13 +1,11 @@
 { pkgs, ... }:
 
 {
+  # Base system/admin tools.
+  # Desktop applications used only by Corey belong in Home Manager.
   environment.systemPackages = with pkgs; [
     git
-    btop
-    wl-clipboard
-    fastfetch
-    kitty
-    firefox
-    yazi
+    vim
+    wget
   ];
 }

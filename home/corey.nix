@@ -1,73 +1,140 @@
-{pkgs, config, ...}:
+{ pkgs, config, ... }:
 
 {
+  # ---------------------------------------------------------------------------
+  # Home Manager identity
+  # ---------------------------------------------------------------------------
+
   home.username = "corey";
   home.homeDirectory = "/home/corey";
+
+  # Home Manager compatibility version.
+  # Do not change this merely because Home Manager itself is upgraded.
   home.stateVersion = "26.05";
-
- xdg.userDirs = {
-     enable = true;
-     createDirectories = true;
-
-     desktop = "${config.home.homeDirectory}/Desktop";
-     documents = "${config.home.homeDirectory}/Documents";
-     download = "${config.home.homeDirectory}/Downloads";
-     music = "${config.home.homeDirectory}/Music";
-     pictures = "${config.home.homeDirectory}/Pictures";
-   };
-
 
   programs.home-manager.enable = true;
 
-  programs.kitty = { 
+  # ---------------------------------------------------------------------------
+  # Standard user directories
+  # ---------------------------------------------------------------------------
+
+  xdg.userDirs = {
     enable = true;
+    createDirectories = true;
+
+    desktop = "${config.home.homeDirectory}/Desktop";
+    documents = "${config.home.homeDirectory}/Documents";
+    download = "${config.home.homeDirectory}/Downloads";
+    music = "${config.home.homeDirectory}/Music";
+    pictures = "${config.home.homeDirectory}/Pictures";
+  };
+
+  # ---------------------------------------------------------------------------
+  # Terminal
+  # ---------------------------------------------------------------------------
+
+  programs.kitty = {
+    enable = true;
+
     extraConfig = ''
+      # Noctalia generates this theme file from the current desktop palette.
       include themes/noctalia.conf
+
       background_opacity 0.82
     '';
-   };
+  };
+
+  # ---------------------------------------------------------------------------
+  # Shell
+  # ---------------------------------------------------------------------------
 
   programs.fish = {
     enable = true;
+
     shellAliases = {
       ll = "ls -lah";
-      rebuild = "sudo nixos-rebuild switch --flake ~/nixos-config#nixos";
     };
 
-   interactiveShellInit = ''
+    # Rebuild whichever host this configuration is currently running on.
+    # Example:
+    #   nixos-vm      -> .#nixos-vm
+    #   nixos-desktop -> .#nixos-desktop
+    functions = {
+      rebuild = ''
+        sudo nixos-rebuild switch --flake ~/nixos-config#(hostname)
+      '';
+    };
+
+    interactiveShellInit = ''
+      # Disable Fish's default greeting.
       set -g fish_greeting
     '';
   };
 
+  # ---------------------------------------------------------------------------
+  # File manager
+  # ---------------------------------------------------------------------------
+
   programs.yazi.enable = true;
+
+  # ---------------------------------------------------------------------------
+  # User applications
+  # ---------------------------------------------------------------------------
 
   home.packages = with pkgs; [
     firefox
     vesktop
+
     btop
+    fastfetch
+    wl-clipboard
+
     qt6Packages.qt6ct
     papirus-icon-theme
     bibata-cursors
-    fastfetch
+
     satty
     gnome-text-editor
     gnome-calculator
     hyprpicker
   ];
 
- # Hyprland
+  # ---------------------------------------------------------------------------
+  # Hyprland
+  # ---------------------------------------------------------------------------
+
+  # NixOS installs Hyprland itself.
+  # Home Manager owns Corey's Hyprland configuration.
   wayland.windowManager.hyprland = {
     enable = true;
     package = null;
+
+    # The imported configuration is written using Hyprland's Lua support.
     configType = "lua";
+
+    # UWSM manages the session instead of Home Manager's Hyprland service.
     systemd.enable = false;
 
     extraConfig = builtins.readFile ./corey/hypr/hyprland.lua;
   };
 
+  # Deploy the modular Lua configuration directory.
+  xdg.configFile."hypr/config" = {
+    source = ./corey/hypr/config;
+    recursive = true;
+  };
+
+  # Hyprland desktop portal configuration.
+  xdg.configFile."hypr/xdph.conf".source =
+    ./corey/hypr/xdph.conf;
+
+  # ---------------------------------------------------------------------------
+  # Qt theming
+  # ---------------------------------------------------------------------------
+
   xdg.configFile."qt6ct/qt6ct.conf".text = ''
     [Appearance]
-    color_scheme_path=/home/corey/.local/share/color-schemes/noctalia.colors
+    color_scheme_path=${config.home.homeDirectory}/.local/share/color-schemes/noctalia.colors
     custom_palette=true
     icon_theme=Papirus
     standard_dialogs=default
@@ -94,40 +161,50 @@
     force_raster_widgets=1
   '';
 
+  # ---------------------------------------------------------------------------
+  # UWSM session environment
+  # ---------------------------------------------------------------------------
+
   xdg.configFile."uwsm/env".text = ''
-  export BROWSER=firefox
-  export TERM=xterm-kitty
+    export BROWSER=firefox
+    export TERM=xterm-kitty
 
-  export QT_QPA_PLATFORM="wayland;xcb"
-  export QT_QPA_PLATFORMTHEME="qt6ct"
-  export ELECTRON_OZONE_PLATFORM_HINT=auto
+    export QT_QPA_PLATFORM="wayland;xcb"
+    export QT_QPA_PLATFORMTHEME="qt6ct"
+    export ELECTRON_OZONE_PLATFORM_HINT=auto
 
-  export HYPRCURSOR_THEME="Bibata-Modern-Ice"
-  export HYPRCURSOR_SIZE=24
-  export XCURSOR_THEME="Bibata-Modern-Ice"
-  export XCURSOR_SIZE=24
+    export HYPRCURSOR_THEME="Bibata-Modern-Ice"
+    export HYPRCURSOR_SIZE=24
+    export XCURSOR_THEME="Bibata-Modern-Ice"
+    export XCURSOR_SIZE=24
 
-  # NVIDIA settings get enabled for the physical desktop later.
-  # export GBM_BACKEND=nvidia-drm
-  # export __GLX_VENDOR_LIBRARY_NAME=nvidia
-  # export LIBVA_DRIVER_NAME=nvidia
-  # export __GL_GSYNC_ALLOWED=1
-'';
+    # Older NVIDIA/Wayland setups sometimes required additional variables.
+    # Leave these disabled unless testing shows they are actually necessary.
+    # export GBM_BACKEND=nvidia-drm
+    # export __GLX_VENDOR_LIBRARY_NAME=nvidia
+    # export LIBVA_DRIVER_NAME=nvidia
+    # export __GL_GSYNC_ALLOWED=1
+  '';
 
-  xdg.configFile."hypr/config" = {
-    source = ./corey/hypr/config;
-    recursive = true;
-  };
-
-  xdg.configFile."hypr/xdph.conf".source =
-    ./corey/hypr/xdph.conf;
+  # ---------------------------------------------------------------------------
+  # Noctalia
+  # ---------------------------------------------------------------------------
 
   xdg.configFile."noctalia/config.toml".source =
-   ./corey/noctalia/config.toml;
+    ./corey/noctalia/config.toml;
 
+  # ---------------------------------------------------------------------------
+  # XDG portals
+  # ---------------------------------------------------------------------------
+
+  # Home Manager's Hyprland integration participates in portal setup.
+  # Explicitly prefer the Hyprland portal, with GTK as fallback.
   xdg.portal = {
     enable = true;
-    config.common.default = "*";
-  };
 
+    config.hyprland.default = [
+      "hyprland"
+      "gtk"
+    ];
+  };
 }
