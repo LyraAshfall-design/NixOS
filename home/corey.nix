@@ -43,6 +43,7 @@
 
   home.packages = with pkgs; [
     firefox
+    vesktop
     btop
     qt6Packages.qt6ct
     papirus-icon-theme
