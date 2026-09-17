@@ -16,14 +16,17 @@
   };
 
   outputs = { nixpkgs, home-manager, noctalia, ... }: {
-    nixosConfigurations.nixos = nixpkgs.lib.nixosSystem {
-      system = "x86_64-linux";
+    nixosConfigurations = {
+      nixos-vm = nixpkgs.lib.nixosSystem {
+        system = "x86_64-linux";
 
-      modules = [
-        ./configuration.nix
-        home-manager.nixosModules.home-manager
-	noctalia.nixosModules.default
-      ];
+        modules = [
+          ./configuration.nix
+          ./hosts/vm/default.nix
+          home-manager.nixosModules.home-manager
+          noctalia.nixosModules.default
+        ];
+      };
     };
   };
 }

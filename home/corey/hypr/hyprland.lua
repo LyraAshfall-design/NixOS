@@ -10,6 +10,10 @@ require("config.inputs")
 require("config.binds")
 require("config.misc")
 require("config.monitors")
--- require("config.monitor-recovery")
+
+if hl.get_monitor(MONITOR1) ~= nil and hl.get_monitor(MONITOR2) ~= nil then
+    require("config.monitor-recovery")
+end
+
 require("config.windowrules")
 require("config.workspaces")
