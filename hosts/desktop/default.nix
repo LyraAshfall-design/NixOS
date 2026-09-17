@@ -7,10 +7,11 @@
 
   networking.hostName = "nixos-desktop";
 
-  # Firmware for Wi-Fi / Bluetooth and other hardware
+  boot.loader.systemd-boot.enable = true;
+  boot.loader.efi.canTouchEfiVariables = true;
+
   hardware.enableRedistributableFirmware = true;
 
-  # Bluetooth
   hardware.bluetooth = {
     enable = true;
     powerOnBoot = true;
@@ -18,7 +19,6 @@
 
   services.blueman.enable = true;
 
-  # Audio
   security.rtkit.enable = true;
 
   services.pipewire = {
