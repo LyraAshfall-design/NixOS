@@ -15,6 +15,20 @@
     "flakes"
   ];
 
+  # ---------------------------------------------------------------------------
+  # Nix store maintenance
+  # ---------------------------------------------------------------------------
+
+  # Automatically remove old, unreachable store paths once a week.
+  nix.gc = {
+    automatic = true;
+    dates = "weekly";
+    options = "--delete-older-than 14d";
+  };
+
+  # Deduplicate identical files in the Nix store.
+  nix.optimise.automatic = true;
+
   # Track the newest kernel available in the pinned NixOS release.
   boot.kernelPackages = pkgs.linuxPackages_latest;
 
