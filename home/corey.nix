@@ -1,6 +1,11 @@
 { pkgs, config, ... }:
 
 {
+  # Corey's background services.
+  imports = [
+    ./corey/services/mogledger.nix
+  ];
+
   # ---------------------------------------------------------------------------
   # Home Manager identity
   # ---------------------------------------------------------------------------
