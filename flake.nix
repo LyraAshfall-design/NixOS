@@ -33,8 +33,18 @@
         ];
       };
 
-      # nixos-desktop will be added here once the physical machine has
-      # a real hardware-configuration.nix generated during installation.
+      # Physical desktop.
+      nixos-desktop = nixpkgs.lib.nixosSystem {
+        system = "x86_64-linux";
+
+        modules = [
+          ./configuration.nix
+          ./hosts/desktop/default.nix
+
+          home-manager.nixosModules.home-manager
+          noctalia.nixosModules.default
+        ];
+      };
     };
   };
 }

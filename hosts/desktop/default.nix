@@ -3,6 +3,7 @@
 {
   # Hardware-specific modules for the physical desktop.
   imports = [
+    ./hardware-configuration.nix
     ../../modules/nvidia.nix
   ];
 
@@ -24,6 +25,4 @@
   # GUI Bluetooth manager.
   services.blueman.enable = true;
 
-  # A real hardware-configuration.nix will be added when NixOS is
-  # installed on the physical machine. Do not fabricate disk UUIDs.
 }
