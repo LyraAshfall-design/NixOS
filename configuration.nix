@@ -29,8 +29,6 @@
   # Deduplicate identical files in the Nix store.
   nix.optimise.automatic = true;
 
-  # Track the newest kernel available in the pinned NixOS release.
-  boot.kernelPackages = pkgs.linuxPackages_latest;
 
   # NetworkManager handles wired and wireless networking.
   networking.networkmanager.enable = true;
