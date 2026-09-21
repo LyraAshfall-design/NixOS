@@ -19,6 +19,16 @@
 
   programs.home-manager.enable = true;
 
+
+  home.pointerCursor = {
+    enable = true;
+    gtk.enable = true;
+    x11.enable = true;
+    package = pkgs.bibata-cursors;
+    name = "Bibata-Modern-Ice";
+    size = 24;
+  };
+
   # ---------------------------------------------------------------------------
   # Standard user directories
   # ---------------------------------------------------------------------------
@@ -95,15 +105,15 @@
   home.packages = with pkgs; [
     firefox
     vesktop
-
+    bitwarden-desktop
     btop
     fastfetch
     wl-clipboard
-
+    onlyoffice-desktopeditors
     qt6Packages.qt6ct
     papirus-icon-theme
     bibata-cursors
-
+    xivlauncher
     satty
     gnome-text-editor
     gnome-calculator
