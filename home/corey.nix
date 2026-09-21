@@ -64,11 +64,17 @@
     # Example:
     #   nixos-vm      -> .#nixos-vm
     #   nixos-desktop -> .#nixos-desktop
-    functions = {
-      rebuild = ''
-        sudo nixos-rebuild switch --flake ~/nixos-config#(hostname)
-      '';
-    };
+  functions = {
+    rebuild = ''
+      sudo nixos-rebuild switch --flake ~/nixos-config#(hostname)
+    '';
+
+    update = ''
+      cd ~/nixos-config
+      nix flake update; or return
+      rebuild
+    '';
+  };
 
     interactiveShellInit = ''
       # Disable Fish's default greeting.
