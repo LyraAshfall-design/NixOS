@@ -1,4 +1,4 @@
-{ pkgs, ... }:
+{ pkgs, desktopTheme, ... }:
 
 {
   programs.waybar = {
@@ -12,9 +12,9 @@
     settings = {
       mainBar = {
         layer = "top";
-        position = "bottom";
-        height = 34;
-        spacing = 4;
+        position = "top";
+        height = 20;
+        spacing = 2;
 
         modules-left = [
           "sway/workspaces"
@@ -32,6 +32,7 @@
           "custom/weather"
           "clock"
           "tray"
+          "custom/session"
         ];
 
         "sway/workspaces" = {
@@ -98,7 +99,14 @@
         };
 
         tray = {
-          spacing = 8;
+          icon-size = 14;
+          spacing = 4;
+        };
+
+        "custom/session" = {
+          format = "⏻";
+          tooltip-format = "Session";
+          on-click = "session-menu";
         };
       };
     };
@@ -106,61 +114,61 @@
     style = ''
       * {
         font-family: sans-serif;
-        font-size: 13px;
+        font-size: 11px;
         min-height: 0;
       }
 
       window#waybar {
-        background: rgba(30, 30, 46, 0.94);
-        color: #cdd6f4;
+        background: rgba(${desktopTheme.rgb "base"}, 0.94);
+        color: ${desktopTheme.hex "text"};
       }
 
       #workspaces {
-        margin: 4px 3px;
-        padding: 0 3px;
-        background: #313244;
-        border-radius: 9px;
+        margin: 1px 2px;
+        padding: 0 2px;
+        background: ${desktopTheme.hex "surface"};
+        border-radius: 5px;
       }
 
       #workspaces button {
-        min-width: 28px;
-        padding: 0 7px;
-        margin: 3px 2px;
+        min-width: 18px;
+        padding: 0 4px;
+        margin: 1px;
 
-        color: #7f849c;
+        color: ${desktopTheme.hex "muted"};
         background: transparent;
 
         border: none;
-        border-radius: 7px;
+        border-radius: 4px;
       }
 
       #workspaces button:hover {
-        color: #cdd6f4;
-        background: #45475a;
+        color: ${desktopTheme.hex "text"};
+        background: ${desktopTheme.hex "overlay"};
       }
 
       #workspaces button.focused {
-        color: #1e1e2e;
-        background: #89b4fa;
+        color: ${desktopTheme.hex "base"};
+        background: ${desktopTheme.hex "accent"};
       }
 
-      #workspaces button.visible {
-        color: #cdd6f4;
+      #workspaces button.visible:not(.focused) {
+        color: ${desktopTheme.hex "text"};
       }
 
       #workspaces button.urgent {
-        color: #1e1e2e;
-        background: #f38ba8;
+        color: ${desktopTheme.hex "base"};
+        background: ${desktopTheme.hex "urgent"};
       }
 
       #window {
-        margin: 4px 6px;
-        padding: 0 12px;
+        margin: 1px 3px;
+        padding: 0 6px;
 
-        color: #bac2de;
-        background: #313244;
+        color: ${desktopTheme.hex "muted"};
+        background: ${desktopTheme.hex "surface"};
 
-        border-radius: 9px;
+        border-radius: 5px;
       }
 
       #cpu,
@@ -169,27 +177,42 @@
       #pulseaudio,
       #custom-weather,
       #clock,
-      #tray {
-        margin: 4px 3px;
-        padding: 0 10px;
+      #tray,
+      #custom-session {
+        margin: 1px 2px;
+        padding: 0 6px;
 
-        color: #cdd6f4;
-        background: #313244;
+        color: ${desktopTheme.hex "text"};
+        background: ${desktopTheme.hex "surface"};
 
-        border-radius: 9px;
+        border-radius: 5px;
       }
 
       #pulseaudio.muted {
-        color: #7f849c;
+        color: ${desktopTheme.hex "muted"};
+      }
+
+      #network {
+        color: ${desktopTheme.hex "sage"};
       }
 
       #network.disconnected {
-        color: #f38ba8;
+        color: ${desktopTheme.hex "urgent"};
       }
 
       #clock {
-        margin-right: 4px;
-        color: #89b4fa;
+        margin-right: 2px;
+        color: ${desktopTheme.hex "accent"};
+      }
+
+      #custom-session {
+        font-family: "Unifont", sans-serif;
+        color: ${desktopTheme.hex "secondary"};
+      }
+
+      #custom-session:hover {
+        color: ${desktopTheme.hex "accent"};
+        background: ${desktopTheme.hex "overlay"};
       }
     '';
   };

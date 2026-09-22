@@ -1,4 +1,4 @@
-{ pkgs, lib, osConfig, ... }:
+{ pkgs, lib, osConfig, desktopTheme, ... }:
 
 let
   bluetooth = osConfig.services.blueman.enable;
@@ -27,7 +27,7 @@ let
     text = ''
       exec ${pkgs.kitty}/bin/kitty --class weather-popup --title Weather \
         -o background_opacity=1 -o initial_window_width=100c -o initial_window_height=32c \
-        -o foreground='#cdd6f4' -o background='#1e1e2e' \
+        -o foreground='${desktopTheme.hex "text"}' -o background='${desktopTheme.hex "base"}' \
         ${weatherReport}/bin/weather-report
     '';
   };

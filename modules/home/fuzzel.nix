@@ -1,4 +1,4 @@
-{ pkgs, ... }:
+{ pkgs, desktopTheme, ... }:
 
 {
   programs.fuzzel = {
@@ -24,20 +24,20 @@
       };
 
       colors = {
-        background = "1e1e2ef2";
-        text = "cdd6f4ff";
+        background = "${desktopTheme.raw "base"}f2";
+        text = "${desktopTheme.raw "text"}ff";
 
-        prompt = "89b4faff";
-        placeholder = "7f849cff";
+        prompt = "${desktopTheme.raw "accent"}ff";
+        placeholder = "${desktopTheme.raw "muted"}ff";
 
-        input = "cdd6f4ff";
-        match = "89b4faff";
+        input = "${desktopTheme.raw "text"}ff";
+        match = "${desktopTheme.raw "accent"}ff";
 
-        selection = "313244ff";
-        selection-text = "cdd6f4ff";
-        selection-match = "89b4faff";
+        selection = "${desktopTheme.raw "accent"}ff";
+        selection-text = "${desktopTheme.raw "base"}ff";
+        selection-match = "${desktopTheme.raw "surface"}ff";
 
-        border = "89b4faff";
+        border = "${desktopTheme.raw "accent"}ff";
       };
 
       border = {

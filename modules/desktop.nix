@@ -1,6 +1,17 @@
 { pkgs, ... }:
 
 {
+  imports = [ ./desktop/sddm.nix ];
+
+  # File management only; this does not enable the XFCE desktop.
+  programs.thunar = {
+    enable = true;
+    plugins = with pkgs; [ thunar-archive-plugin thunar-volman ];
+  };
+  services.gvfs.enable = true;
+  services.tumbler.enable = true;
+  environment.systemPackages = [ pkgs.file-roller ];
+
   # Retained Hyprland fallback compositor.
   # UWSM manages the graphical session and its environment.
   programs.hyprland = {
@@ -46,26 +57,6 @@
     };
 
     pulse.enable = true;
-  };
-
-  # Astronaut theme files for SDDM.
-  environment.systemPackages = with pkgs; [
-    sddm-astronaut
-  ];
-
-  # Graphical login manager.
-  services.displayManager.sddm = {
-    enable = true;
-    package = pkgs.kdePackages.sddm;
-    wayland.enable = true;
-    theme = "sddm-astronaut-theme";
-
-    # Qt components required by the Astronaut theme.
-    extraPackages = with pkgs; [
-      kdePackages.qtmultimedia
-      kdePackages.qtsvg
-      kdePackages.qtvirtualkeyboard
-    ];
   };
 
   # Desktop portals provide Wayland applications with things such as

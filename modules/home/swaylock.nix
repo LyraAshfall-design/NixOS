@@ -1,11 +1,11 @@
-{ ... }:
+{ desktopTheme, ... }:
 
 {
   programs.swaylock = {
     enable = true;
 
     settings = {
-      color = "1e1e2e";
+      color = desktopTheme.raw "mantle";
 
       font = "sans-serif";
       font-size = 24;
@@ -13,13 +13,26 @@
       indicator-radius = 100;
       indicator-thickness = 8;
 
-      inside-color = "313244";
-      ring-color = "89b4fa";
+      inside-color = desktopTheme.raw "surface";
+      ring-color = desktopTheme.raw "accent";
 
-      key-hl-color = "a6e3a1";
-      bs-hl-color = "f38ba8";
+      key-hl-color = desktopTheme.raw "sage";
+      bs-hl-color = desktopTheme.raw "urgent";
 
-      text-color = "cdd6f4";
+      inside-clear-color = desktopTheme.raw "surface";
+      inside-ver-color = desktopTheme.raw "surface";
+      inside-wrong-color = desktopTheme.raw "surface";
+      ring-clear-color = desktopTheme.raw "secondary";
+      ring-ver-color = desktopTheme.raw "warning";
+      ring-wrong-color = desktopTheme.raw "urgent";
+      text-clear-color = desktopTheme.raw "text";
+      text-ver-color = desktopTheme.raw "text";
+      text-wrong-color = desktopTheme.raw "text";
+      line-clear-color = "00000000";
+      line-ver-color = "00000000";
+      line-wrong-color = "00000000";
+
+      text-color = desktopTheme.raw "text";
 
       line-color = "00000000";
       separator-color = "00000000";

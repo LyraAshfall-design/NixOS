@@ -21,14 +21,6 @@
   programs.home-manager.enable = true;
 
 
-  home.pointerCursor = {
-    enable = true;
-    gtk.enable = true;
-    x11.enable = true;
-    package = pkgs.bibata-cursors;
-    name = "Bibata-Modern-Ice";
-    size = 24;
-  };
 
   # ---------------------------------------------------------------------------
   # Standard user directories
@@ -43,25 +35,6 @@
     download = "${config.home.homeDirectory}/Downloads";
     music = "${config.home.homeDirectory}/Music";
     pictures = "${config.home.homeDirectory}/Pictures";
-  };
-
-  # ---------------------------------------------------------------------------
-  # Terminal
-  # ---------------------------------------------------------------------------
-
-  programs.kitty = {
-    enable = true;
-
-    extraConfig = ''
-      # Static fallback until the desktop theming pass.
-      foreground #cdd6f4
-      background #1e1e2e
-      cursor #f5e0dc
-      selection_foreground #1e1e2e
-      selection_background #cdd6f4
-
-      background_opacity 0.82
-    '';
   };
 
   # ---------------------------------------------------------------------------
@@ -98,12 +71,6 @@
   };
 
   # ---------------------------------------------------------------------------
-  # File manager
-  # ---------------------------------------------------------------------------
-
-  programs.yazi.enable = true;
-
-  # ---------------------------------------------------------------------------
   # User applications
   # ---------------------------------------------------------------------------
 
@@ -111,13 +78,9 @@
     firefox
     vesktop
     bitwarden-desktop
-    btop
     fastfetch
     wl-clipboard
     onlyoffice-desktopeditors
-    qt6Packages.qt6ct
-    papirus-icon-theme
-    bibata-cursors
     xivlauncher
     satty
     gnome-text-editor
@@ -156,45 +119,12 @@
     ./corey/hypr/xdph.conf;
 
   # ---------------------------------------------------------------------------
-  # Qt theming
-  # ---------------------------------------------------------------------------
-
-  xdg.configFile."qt6ct/qt6ct.conf".text = ''
-    [Appearance]
-    color_scheme_path=${pkgs.qt6Packages.qt6ct}/share/qt6ct/colors/darker.conf
-    custom_palette=true
-    icon_theme=Papirus
-    standard_dialogs=default
-    style=Fusion
-
-    [Fonts]
-    fixed="monospace,9,-1,2,400,0,0,0,0,0,0,0,0,0,0,1,,0,0"
-    general="Sans Serif,9,-1,5,400,0,0,0,0,0,0,0,0,0,0,1,,0,0"
-
-    [Interface]
-    activate_item_on_single_click=1
-    buttonbox_layout=0
-    cursor_flash_time=1000
-    dialog_buttons_have_icons=1
-    double_click_interval=400
-    keyboard_scheme=2
-    menus_have_icons=true
-    show_shortcuts_in_context_menus=true
-    toolbutton_style=4
-    underline_shortcut=1
-    wheel_scroll_lines=3
-
-    [Troubleshooting]
-    force_raster_widgets=1
-  '';
-
-  # ---------------------------------------------------------------------------
   # UWSM environment for the retained Hyprland fallback only.
   # Common application settings live in modules/desktop.nix.
   # ---------------------------------------------------------------------------
 
   xdg.configFile."uwsm/env-hyprland".text = ''
-    export HYPRCURSOR_THEME="Bibata-Modern-Ice"
+    export HYPRCURSOR_THEME="${config.home.pointerCursor.name}"
     export HYPRCURSOR_SIZE=24
   '';
 

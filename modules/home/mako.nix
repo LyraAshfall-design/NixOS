@@ -1,4 +1,4 @@
-{ pkgs, ... }:
+{ pkgs, desktopTheme, ... }:
 
 let
   makoCenter = pkgs.writeShellApplication {
@@ -79,9 +79,12 @@ in {
 
       font = "sans-serif 11";
 
-      background-color = "#1e1e2ef2";
-      text-color = "#cdd6f4ff";
-      border-color = "#89b4faff";
+      background-color = "${desktopTheme.hex "surface"}f2";
+      text-color = "${desktopTheme.hex "text"}ff";
+      border-color = "${desktopTheme.hex "accent"}ff";
+
+      "urgency=low".border-color = "${desktopTheme.hex "secondary"}ff";
+      "urgency=critical".border-color = "${desktopTheme.hex "urgent"}ff";
 
       border-size = 2;
       border-radius = 10;

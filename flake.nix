@@ -16,9 +16,14 @@
       url = "github:noctalia-dev/noctalia";
       inputs.nixpkgs.follows = "nixpkgs";
     };
+
+    silent-sddm = {
+      url = "github:uiriansan/SilentSDDM";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
   };
 
-  outputs = { nixpkgs, home-manager, noctalia, ... }: {
+  outputs = { nixpkgs, home-manager, noctalia, silent-sddm, ... }: {
     nixosConfigurations = {
       # Current development/test VM.
       nixos-vm = nixpkgs.lib.nixosSystem {
@@ -30,6 +35,7 @@
 
           home-manager.nixosModules.home-manager
           noctalia.nixosModules.default
+          silent-sddm.nixosModules.default
         ];
       };
 
@@ -43,6 +49,7 @@
 
           home-manager.nixosModules.home-manager
           noctalia.nixosModules.default
+          silent-sddm.nixosModules.default
         ];
       };
     };

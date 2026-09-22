@@ -1,4 +1,4 @@
-{ pkgs, ... }:
+{ pkgs, osConfig, ... }:
 
 {
   wayland.windowManager.sway = {
@@ -92,7 +92,7 @@
           "exec ${pkgs.firefox}/bin/firefox";
 
         "Mod4+e" =
-          "exec ${pkgs.kitty}/bin/kitty -o confirm_os_window_close=0 -e ${pkgs.yazi}/bin/yazi";
+          "exec ${osConfig.programs.thunar.finalPackage}/bin/thunar";
 
         "Mod4+t" =
           "exec ${pkgs.gnome-text-editor}/bin/gnome-text-editor --new-window";

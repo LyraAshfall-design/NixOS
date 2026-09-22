@@ -95,7 +95,8 @@ source = "wallpaper"
 wallpaper_scheme = "m3-tonal-spot"
 
     [theme.templates]
-    builtin_ids = [ "btop", "gtk3", "gtk4", "kcolorscheme", "alacritty" ]
+    # Shared application themes are owned by Home Manager in both sessions.
+    builtin_ids = [ ]
 
 [widget.clock]
 color = "secondary"
