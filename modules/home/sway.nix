@@ -17,9 +17,6 @@
         "systemctl --user reset-failed"
         "systemctl --user start sway-session.target"
 
-        # Temporary while Noctalia still provides a few shell features.
-        "systemctl --user restart noctalia.service || true"
-
         # Remain alive until this Sway compositor exits.
         "swaymsg -mt subscribe '[]' || true"
 
@@ -216,8 +213,6 @@
 
         # ---------------------------------------------------------------------
         # Desktop utilities
-        #
-        # Emoji, weather, and monitor brightness still use Noctalia.
         # ---------------------------------------------------------------------
 
         "Mod4+z" =
@@ -227,7 +222,7 @@
           "exec desktop-controls";
 
         "Mod4+period" =
-          "exec noctalia msg panel-toggle launcher /emo";
+          "exec emoji-picker";
 
         "Mod4+l" =
           "exec ${pkgs.swaylock}/bin/swaylock -f";
@@ -245,7 +240,7 @@
           "exec ~/.local/bin/wallpaper-next";
 
         "Mod4+Mod1+w" =
-          "exec noctalia msg panel-toggle control-center weather";
+          "exec weather-popup";
 
         # ---------------------------------------------------------------------
         # Mako notification center
@@ -296,16 +291,6 @@
 
         "XF86AudioPrev" =
           "exec ${pkgs.playerctl}/bin/playerctl previous";
-
-        # ---------------------------------------------------------------------
-        # Brightness
-        # ---------------------------------------------------------------------
-
-        "XF86MonBrightnessUp" =
-          "exec noctalia msg brightness-up";
-
-        "XF86MonBrightnessDown" =
-          "exec noctalia msg brightness-down";
 
         # ---------------------------------------------------------------------
         # Session

@@ -1,5 +1,5 @@
 -- Environmental variables (for reference https://wiki.hypr.land/Configuring/Advanced-and-Cool/Environment-variables/)
--- if you use UWSM, define your variables in ~/.config/uwsm/env
+-- if you use UWSM, define your variables in ~/.config/uwsm/env-hyprland
 -- if you don't use UWSM, define your variables here (e.g. hl.env("QT_QPA_PLATFORM", "wayland"))
 
 -- if you have an NVIDIA GPU uncomment the following lines:

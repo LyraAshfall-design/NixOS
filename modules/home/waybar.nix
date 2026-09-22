@@ -29,6 +29,7 @@
           "memory"
           "network"
           "pulseaudio"
+          "custom/weather"
           "clock"
           "tray"
         ];
@@ -79,10 +80,21 @@
           on-click = "${pkgs.pavucontrol}/bin/pavucontrol";
         };
 
+        "custom/weather" = {
+          exec = "${pkgs.wttrbar}/bin/wttrbar";
+          return-type = "json";
+          format = "{}";
+          interval = 3600;
+          on-click = "weather-popup";
+          exec-on-event = false;
+          tooltip = true;
+        };
+
         clock = {
           format = "{:%a %b %d  %H:%M}";
           tooltip-format = "{:%A, %B %d, %Y}";
           timezone = "Etc/GMT+7";
+          on-click = "${pkgs.gsimplecal}/bin/gsimplecal";
         };
 
         tray = {
@@ -155,6 +167,7 @@
       #memory,
       #network,
       #pulseaudio,
+      #custom-weather,
       #clock,
       #tray {
         margin: 4px 3px;

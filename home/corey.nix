@@ -1,4 +1,4 @@
-{ pkgs, config, ... }:
+{ pkgs, config, osConfig, ... }:
 
 {
   # Corey's background services.
@@ -53,8 +53,12 @@
     enable = true;
 
     extraConfig = ''
-      # Noctalia generates this theme file from the current desktop palette.
-      include themes/noctalia.conf
+      # Static fallback until the desktop theming pass.
+      foreground #cdd6f4
+      background #1e1e2e
+      cursor #f5e0dc
+      selection_foreground #1e1e2e
+      selection_background #cdd6f4
 
       background_opacity 0.82
     '';
@@ -157,7 +161,7 @@
 
   xdg.configFile."qt6ct/qt6ct.conf".text = ''
     [Appearance]
-    color_scheme_path=${config.home.homeDirectory}/.local/share/color-schemes/noctalia.colors
+    color_scheme_path=${pkgs.qt6Packages.qt6ct}/share/qt6ct/colors/darker.conf
     custom_palette=true
     icon_theme=Papirus
     standard_dialogs=default
@@ -185,28 +189,13 @@
   '';
 
   # ---------------------------------------------------------------------------
-  # UWSM session environment
+  # UWSM environment for the retained Hyprland fallback only.
+  # Common application settings live in modules/desktop.nix.
   # ---------------------------------------------------------------------------
 
-  xdg.configFile."uwsm/env".text = ''
-    export BROWSER=firefox
-    export TERM=xterm-kitty
-
-    export QT_QPA_PLATFORM="wayland;xcb"
-    export QT_QPA_PLATFORMTHEME="qt6ct"
-    export ELECTRON_OZONE_PLATFORM_HINT=auto
-
+  xdg.configFile."uwsm/env-hyprland".text = ''
     export HYPRCURSOR_THEME="Bibata-Modern-Ice"
     export HYPRCURSOR_SIZE=24
-    export XCURSOR_THEME="Bibata-Modern-Ice"
-    export XCURSOR_SIZE=24
-
-    # Older NVIDIA/Wayland setups sometimes required additional variables.
-    # Leave these disabled unless testing shows they are actually necessary.
-    # export GBM_BACKEND=nvidia-drm
-    # export __GLX_VENDOR_LIBRARY_NAME=nvidia
-    # export LIBVA_DRIVER_NAME=nvidia
-    # export __GL_GSYNC_ALLOWED=1
   '';
 
   # ---------------------------------------------------------------------------
@@ -216,18 +205,7 @@
   xdg.configFile."noctalia/config.toml".source =
     ./corey/noctalia/config.toml;
 
-  # ---------------------------------------------------------------------------
-  # XDG portals
-  # ---------------------------------------------------------------------------
-
-  # Home Manager's Hyprland integration participates in portal setup.
-  # Explicitly prefer the Hyprland portal, with GTK as fallback.
-  xdg.portal = {
-    enable = true;
-
-    config.hyprland.default = [
-      "hyprland"
-      "gtk"
-    ];
-  };
+  # Portal routing is owned by the NixOS desktop modules for both sessions.
+  # Mirror it at user scope because the fallback compositor enables HM portals.
+  xdg.portal.config = osConfig.xdg.portal.config;
 }
