@@ -22,6 +22,14 @@ MAX_SOURCE_REQUESTS=${MAX_SOURCE_REQUESTS:-16}
 CURL_CONNECT_TIMEOUT=${CURL_CONNECT_TIMEOUT:-5}
 CURL_MAX_TIME=${CURL_MAX_TIME:-25}
 
+# Time-aware search preference; local color scoring remains authoritative.
+HOUR=$(date +%H)
+if (( 10#$HOUR >= 7 && 10#$HOUR < 18 )); then
+  TIME_TAGS=(daylight cafe forest autumn "golden hour" warm landscape)
+else
+  TIME_TAGS=("rainy street" lantern "cozy interior" "warm city lights" "Japanese street" "dark cafe" amber)
+fi
+
 if [[ ! "$THEME_MIN_SCORE" =~ ^[0-9]{1,3}$ ]] ||
   (( 10#$THEME_MIN_SCORE > 100 )) ||
   [[ ! "$THEME_SAMPLE_SIZE" =~ ^[0-9]{1,3}$ ]] ||
@@ -144,6 +152,7 @@ WH_COLORS=(663300 996633 cc6633 ff9900 ffcc33 666600 336600 cccccc 000000)
 
 mapfile -t REDDIT_SHUFFLED < <(printf 'reddit:%s\n' "${SUBREDDITS[@]}" | shuf)
 mapfile -t WH_SHUFFLED < <(printf 'wallhaven:%s\n' "${WH_TAGS[@]}" | shuf)
+mapfile -t TIME_SHUFFLED < <(printf '%s\n' "${TIME_TAGS[@]}" | shuf)
 
 # Interleave:
 # Wallhaven first: cheap previews before Reddit full-resolution downloads.
@@ -260,6 +269,9 @@ for SRC in "${SOURCES[@]}"; do
   (( ATTEMPTS >= MAX_THEME_ATTEMPTS || SOURCE_REQUESTS >= MAX_SOURCE_REQUESTS )) && break
   TYPE="${SRC%%:*}"
   VALUE="${SRC##*:}"
+  if [[ "$TYPE" == wallhaven ]]; then
+    VALUE="$VALUE ${TIME_SHUFFLED[$((ATTEMPTS % ${#TIME_SHUFFLED[@]}))]}"
+  fi
   SOURCE_ATTEMPTS=0
 
   if [[ "$TYPE" == reddit ]] && (( REDDIT_ATTEMPTS >= MAX_REDDIT_ATTEMPTS )); then

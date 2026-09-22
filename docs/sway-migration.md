@@ -112,7 +112,7 @@ retirement. No fallback retirement is part of this change.
   plugins, File Roller, GVfs and Tumbler without enabling the XFCE desktop.
 - `modules/desktop/sddm.nix` uses the pinned
   [official SilentSDDM module](https://github.com/uiriansan/SilentSDDM/wiki).
-  A bundled, store-readable woodland photo keeps the greeter independent of home
+  A bundled, store-readable café scene keeps the greeter independent of home
   permissions. Warm colors, restrained controls, no blur and no animations are
   configured. Sway is the default; Sway, Hyprland and Hyprland/UWSM sessions remain
   available. Authentication and auto-login settings are unchanged. Noctalia's

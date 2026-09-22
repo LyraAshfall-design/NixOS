@@ -12,6 +12,12 @@ let
     ];
 
     text = ''
+      swaymsg focus_follows_mouse no >/dev/null
+      restore_focus() {
+        swaymsg focus_follows_mouse yes >/dev/null
+      }
+      trap restore_focus EXIT
+
       choice="$(
         printf '%s\n' \
           "Lock" \
@@ -21,6 +27,7 @@ let
           "Shutdown" |
           fuzzel \
             --dmenu \
+            --keyboard-focus=exclusive \
             --prompt="Session > " \
             --width=30 \
             --lines=5
@@ -30,6 +37,7 @@ let
         printf '%s\n' "Yes" "No" |
           fuzzel \
             --dmenu \
+            --keyboard-focus=exclusive \
             --prompt="$1 > " \
             --width=24 \
             --lines=2

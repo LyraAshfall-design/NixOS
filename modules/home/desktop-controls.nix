@@ -31,6 +31,19 @@ let
         ${weatherReport}/bin/weather-report
     '';
   };
+  calendarPopup = pkgs.writeShellApplication {
+    name = "calendar-popup";
+    runtimeInputs = with pkgs; [ gsimplecal sway ];
+    text = ''
+      swaymsg focus_follows_mouse no >/dev/null
+      restore_focus() {
+        swaymsg focus_follows_mouse yes >/dev/null
+      }
+      trap restore_focus EXIT
+
+      gsimplecal
+    '';
+  };
   desktopControls = pkgs.writeShellApplication {
     name = "desktop-controls";
     runtimeInputs = with pkgs; [ fuzzel pavucontrol networkmanagerapplet qt6Packages.qt6ct ]
@@ -50,7 +63,7 @@ let
   };
 in
 {
-  home.packages = [ desktopControls emojiPicker weatherPopup pkgs.gsimplecal ];
+  home.packages = [ desktopControls emojiPicker weatherPopup calendarPopup ];
 
   xdg.configFile."gsimplecal/config".text = ''
     show_calendar = 1

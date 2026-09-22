@@ -33,6 +33,7 @@
       line-wrong-color = "00000000";
 
       text-color = desktopTheme.raw "text";
+      text = "ฅ";
 
       line-color = "00000000";
       separator-color = "00000000";

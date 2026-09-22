@@ -1,7 +1,7 @@
 { pkgs, ... }:
 
 {
-  imports = [ ./desktop/sddm.nix ];
+  imports = [ ./desktop/sddm.nix ./desktop/sway.nix ];
 
   # File management only; this does not enable the XFCE desktop.
   programs.thunar = {

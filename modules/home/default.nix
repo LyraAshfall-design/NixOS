@@ -5,6 +5,7 @@
     ./theme.nix
     ./terminal-theme.nix
     ./file-manager.nix
+    ./system-tools.nix
     ./sway.nix
     ./waybar.nix
     ./fuzzel.nix

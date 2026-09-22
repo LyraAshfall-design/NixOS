@@ -1,4 +1,4 @@
-{ pkgs, ... }:
+{ config, pkgs, ... }:
 
 {
   # Shared workstation configuration.
@@ -6,7 +6,6 @@
   imports = [
     ./modules/desktop.nix
     ./modules/packages.nix
-    ./modules/desktop/sway.nix
     ./modules/gaming.nix
   ];
 
@@ -26,6 +25,12 @@
     dates = "weekly";
     options = "--delete-older-than 14d";
   };
+
+  # Prune only system generations before the existing weekly GC. The +25
+  # selector preserves the current generation; user profiles are not targeted.
+  systemd.services.nix-gc.preStart = ''
+    ${config.nix.package}/bin/nix-env --profile /nix/var/nix/profiles/system --delete-generations +25
+  '';
 
   # Deduplicate identical files in the Nix store.
   nix.optimise.automatic = true;

@@ -178,22 +178,28 @@
           "workspace number 6";
 
         "Mod4+Shift+1" =
-          "move container to workspace number 1";
+          "move container to workspace number 1; workspace number 1";
 
         "Mod4+Shift+2" =
-          "move container to workspace number 2";
+          "move container to workspace number 2; workspace number 2";
 
         "Mod4+Shift+3" =
-          "move container to workspace number 3";
+          "move container to workspace number 3; workspace number 3";
 
         "Mod4+Shift+4" =
-          "move container to workspace number 4";
+          "move container to workspace number 4; workspace number 4";
 
         "Mod4+Shift+5" =
-          "move container to workspace number 5";
+          "move container to workspace number 5; workspace number 5";
 
         "Mod4+Shift+6" =
-          "move container to workspace number 6";
+          "move container to workspace number 6; workspace number 6";
+
+        "Ctrl+Mod4+Shift+Left" =
+          "move container to workspace prev; workspace prev";
+
+        "Ctrl+Mod4+Shift+Right" =
+          "move container to workspace next; workspace next";
 
         # ---------------------------------------------------------------------
         # Scratchpad
@@ -210,6 +216,9 @@
 
         "Mod4+space" =
           "exec ${pkgs.fuzzel}/bin/fuzzel";
+
+        "Mod4+Shift+space" =
+          "exec system-grimoire";
 
         # ---------------------------------------------------------------------
         # Desktop utilities

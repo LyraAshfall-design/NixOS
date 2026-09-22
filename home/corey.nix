@@ -54,7 +54,17 @@
     #   nixos-desktop -> .#nixos-desktop
   functions = {
     rebuild = ''
-      sudo nixos-rebuild switch --flake ~/nixos-config#(hostname)
+      if sudo nixos-rebuild switch --flake ~/nixos-config#(hostname)
+        set generation (readlink /nix/var/nix/profiles/system | string match -r -g 'system-([0-9]+)-' | head -n1)
+        if test -z "$generation"
+          set generation unknown
+        end
+        notify-send -a NixOS "System rebuild succeeded" "Active generation: $generation"
+        return 0
+      end
+
+      notify-send -u critical -a NixOS "System rebuild failed" "The configuration was not activated. Check the terminal output."
+      return 1
     '';
 
     update = ''

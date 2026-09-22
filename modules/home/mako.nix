@@ -8,9 +8,16 @@ let
       mako
       jq
       fuzzel
+      sway
     ];
 
     text = ''
+      swaymsg focus_follows_mouse no >/dev/null
+      restore_focus() {
+        swaymsg focus_follows_mouse yes >/dev/null
+      }
+      trap restore_focus EXIT
+
       active="$(makoctl list -j)"
       history="$(makoctl history -j)"
 
@@ -57,6 +64,7 @@ let
       printf '%s\n' "$entries" |
         fuzzel \
           --dmenu \
+          --keyboard-focus=exclusive \
           --prompt="Notifications > " \
           --width=70 \
           --lines=12 \

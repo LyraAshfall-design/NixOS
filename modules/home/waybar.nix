@@ -31,6 +31,8 @@
           "pulseaudio"
           "custom/weather"
           "clock"
+          "custom/nix-generation"
+          "custom/notifications"
           "tray"
           "custom/session"
         ];
@@ -95,7 +97,7 @@
           format = "{:%a %b %d  %H:%M}";
           tooltip-format = "{:%A, %B %d, %Y}";
           timezone = "Etc/GMT+7";
-          on-click = "${pkgs.gsimplecal}/bin/gsimplecal";
+          on-click = "calendar-popup";
         };
 
         tray = {
@@ -104,9 +106,25 @@
         };
 
         "custom/session" = {
-          format = "⏻";
-          tooltip-format = "Session";
+          format = "ฅ ⏻";
+          tooltip = false;
           on-click = "session-menu";
+        };
+
+        # Static bell: history is read only when the existing center is opened.
+        "custom/notifications" = {
+          format = "🔔︎";
+          tooltip-format = "Notifications";
+          on-click = "mako-center";
+        };
+
+        "custom/nix-generation" = {
+          exec = "nix-generation";
+          interval = 300;
+          return-type = "json";
+          format = "{}";
+          on-click = "system-grimoire";
+          tooltip = true;
         };
       };
     };
@@ -177,6 +195,7 @@
       #pulseaudio,
       #custom-weather,
       #clock,
+      #custom-notifications,
       #tray,
       #custom-session {
         margin: 1px 2px;
@@ -207,10 +226,29 @@
 
       #custom-session {
         font-family: "Unifont", sans-serif;
-        color: ${desktopTheme.hex "secondary"};
+        color: ${desktopTheme.hex "accent"};
+      }
+
+      #custom-notifications {
+        font-family: "Unifont Upper", sans-serif;
+        color: ${desktopTheme.hex "text"};
+      }
+
+      #custom-notifications:hover {
+        color: ${desktopTheme.hex "accent"};
+        background: ${desktopTheme.hex "overlay"};
       }
 
       #custom-session:hover {
+        color: ${desktopTheme.hex "accent"};
+        background: ${desktopTheme.hex "overlay"};
+      }
+
+      #custom-nix-generation {
+        color: ${desktopTheme.hex "muted"};
+      }
+
+      #custom-nix-generation:hover {
         color: ${desktopTheme.hex "accent"};
         background: ${desktopTheme.hex "overlay"};
       }
