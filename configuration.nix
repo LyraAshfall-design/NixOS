@@ -6,6 +6,7 @@
   imports = [
     ./modules/desktop.nix
     ./modules/packages.nix
+    ./modules/desktop/sway.nix
     ./modules/gaming.nix
   ];
 

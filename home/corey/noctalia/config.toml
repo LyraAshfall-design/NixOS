@@ -23,6 +23,13 @@ thickness = 35
     opacity = 1.0
     padding = 6.0
 
+[notification]
+enable_daemon = false
+
+[lockscreen]
+enabled = true
+lock_before_suspend = false
+
 [shell]
 clipboard_image_action_command = "satty -f -"
 launch_apps_as_systemd_services = true
@@ -140,3 +147,8 @@ capsule_fill = "on_primary"
 inactive_pill_size = 1.0
 pill_scale = 0.80
 show_labels = false
+
+[osd.kinds]
+volume = false
+volume_output = false
+volume_input = false

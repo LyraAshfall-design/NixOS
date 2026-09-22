@@ -5,12 +5,16 @@
   services.xserver.videoDrivers = [ "nvidia" ];
 
   hardware.nvidia = {
-    # Required for modern Wayland compositors such as Hyprland.
+    # Required for modern Wayland compositors.
     modesetting.enable = true;
 
-    # Use NVIDIA's open kernel module.
-    # This matches the known-good driver model on the RTX 2080 SUPER.
+    # RTX 2080 SUPER supports NVIDIA's open kernel module.
     open = true;
+
+    # Preserve GPU state/VRAM across suspend and resume.
+    powerManagement.enable = true;
+
+    moduleParams.nvidia.NVreg_TemporaryFilePath = "/var/tmp";
 
     # Install the NVIDIA settings utility.
     nvidiaSettings = true;

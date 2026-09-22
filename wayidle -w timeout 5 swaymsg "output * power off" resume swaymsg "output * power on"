@@ -1,0 +1,13 @@
+[0;1;32m●[0m swayidle.service - Idle manager for Wayland
+     Loaded: loaded (]8;;file://nixos-desktop/home/corey/.config/systemd/user/swayidle.service\/home/corey/.config/systemd/user/swayidle.service]8;;\; [0;1;32menabled[0m; preset: ignored)
+     Active: [0;1;32mactive (running)[0m since Mon 2026-09-21 19:47:35 PDT; 1min 44s ago
+ Invocation: e282281cb9c848b185a3bce247cffe64
+       Docs: ]8;;man:swayidle(1)\man:swayidle(1)]8;;\
+   Main PID: 13840 (swayidle)
+      Tasks: 1[0;38:5:245m (limit: 19063)[0m
+     Memory: 408K (peak: 2.5M)
+        CPU: 8ms
+     CGroup: /user.slice/user-1000.slice/user@1000.service/app.slice/swayidle.service
+             └─[0;38:5:245m13840 /nix/store/79zvh3r51lfl29q7iizh4dyv28jvpchg-swayidle-1.9.0/bin/swayidle -w timeout 600 "/nix/store/8cdirccv1qnlh60xndiwxcyiigw2n3fc-swaylock-1.8.6/bin/swaylock -f" timeout 900 "/nix/store/6816vyd7b49db9525xs7rcyk8ygdipwa-sway-1.12/bin/swaymsg 'output * power off'" resume "/nix/store/6816vyd7b49db9525xs7rcyk8ygdipwa-sway-1.12/bin/swaymsg 'output * power on'" before-sleep "/nix/store/8cdirccv1qnlh60xndiwxcyiigw2n3fc-swaylock-1.8.6/bin/swaylock -f" lock "/nix/store/8cdirccv1qnlh60xndiwxcyiigw2n3fc-swaylock-1.8.6/bin/swaylock -f"[0m
+
+Sep 21 19:47:35 nixos-desktop systemd[8037]: Started Idle manager for Wayland.
