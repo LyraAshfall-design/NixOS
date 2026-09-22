@@ -68,6 +68,7 @@
           format-wifi = "{essid} {signalStrength}%";
           format-ethernet = "ETH";
           format-disconnected = "Offline";
+          on-click = "${pkgs.networkmanagerapplet}/bin/nm-connection-editor";
           tooltip = true;
         };
 

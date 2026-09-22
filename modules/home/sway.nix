@@ -215,16 +215,16 @@
           "exec ${pkgs.fuzzel}/bin/fuzzel";
 
         # ---------------------------------------------------------------------
-        # Noctalia
+        # Desktop utilities
         #
-        # Temporary while remaining shell functions are replaced.
+        # Emoji, weather, and monitor brightness still use Noctalia.
         # ---------------------------------------------------------------------
 
         "Mod4+z" =
-          "exec noctalia msg settings-toggle";
+          "exec desktop-controls";
 
         "Mod4+x" =
-          "exec noctalia msg panel-toggle control-center";
+          "exec desktop-controls";
 
         "Mod4+period" =
           "exec noctalia msg panel-toggle launcher /emo";
@@ -236,7 +236,7 @@
           "exec session-menu";
 
         "Mod4+Tab" =
-          "exec noctalia msg window-switcher";
+          "exec sway-window-picker";
 
         "Mod4+v" =
           "exec clipboard-picker";

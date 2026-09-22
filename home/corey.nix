@@ -4,18 +4,7 @@
   # Corey's background services.
   imports = [
     ./corey/services/mogledger.nix
-    ../modules/home/sway.nix
-    ../modules/home/waybar.nix
-    ../modules/home/fuzzel.nix
-    ../modules/home/mako.nix
-    ../modules/home/swaylock.nix
-    ../modules/home/swayidle.nix
-    ../modules/home/clipboard.nix
-    ../modules/home/session-menu.nix
-    ../modules/home/screenshots.nix
-    ../modules/home/wallpaper.nix
-    ../modules/home/media-controls.nix
-    ../modules/home/swayosd.nix
+    ../modules/home
   ];
 
   # ---------------------------------------------------------------------------

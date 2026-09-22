@@ -33,7 +33,8 @@ lock_before_suspend = false
 [shell]
 clipboard_image_action_command = "satty -f -"
 launch_apps_as_systemd_services = true
-polkit_agent = true
+# A standalone agent now serves both Sway and Hyprland.
+polkit_agent = false
 settings_show_advanced = true
 
     [shell.greeter_sync]
