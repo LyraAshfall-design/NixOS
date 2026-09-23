@@ -1,10 +1,11 @@
 { ... }:
 
 {
-  # Hardware-specific modules for the physical desktop.
+  # System modules specific to the physical desktop.
   imports = [
     ./hardware-configuration.nix
     ../../modules/nvidia.nix
+    ../../modules/virtualization.nix
   ];
 
   networking.hostName = "nixos-desktop";

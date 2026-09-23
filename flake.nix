@@ -25,17 +25,13 @@
 
   outputs = { nixpkgs, home-manager, noctalia, silent-sddm, ... }: {
     nixosConfigurations = {
-      # Current development/test VM.
+      # Minimal QEMU/libvirt lab guest.
       nixos-vm = nixpkgs.lib.nixosSystem {
         system = "x86_64-linux";
 
         modules = [
-          ./configuration.nix
+          ./modules/base.nix
           ./hosts/vm/default.nix
-
-          home-manager.nixosModules.home-manager
-          noctalia.nixosModules.default
-          silent-sddm.nixosModules.default
         ];
       };
 

@@ -8,6 +8,12 @@
 
   networking.hostName = "nixos-vm";
 
+  services.qemuGuest.enable = true;
+
+  services.xserver.enable = true;
+  services.xserver.desktopManager.xfce.enable = true;
+  services.xserver.displayManager.lightdm.enable = true;
+
   # This VM was installed with legacy GRUB on its virtual disk.
   # These settings must not be reused by the physical desktop.
   boot.loader.grub = {
