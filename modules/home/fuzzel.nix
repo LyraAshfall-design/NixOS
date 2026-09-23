@@ -19,7 +19,7 @@
         vertical-pad = 14;
         inner-pad = 10;
 
-        prompt = "ฅ ";
+        prompt = "› ";
         placeholder = "Launch...";
       };
 

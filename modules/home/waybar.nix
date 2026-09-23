@@ -1,5 +1,54 @@
 { pkgs, desktopTheme, ... }:
 
+let
+  catMark = ../../assets/theme/cat-mark.svg;
+  catMarkHover = pkgs.writeText "cat-mark-hover.svg"
+    (builtins.replaceStrings [ "#E8DCCB" ] [ "#D19A66" ] (builtins.readFile catMark));
+  catMarkActive = pkgs.writeText "cat-mark-active.svg"
+    (builtins.replaceStrings [ "#E8DCCB" ] [ "#FFFFFF" ] (builtins.readFile catMark));
+  nowPlaying = pkgs.writeShellApplication {
+    name = "waybar-now-playing";
+    runtimeInputs = with pkgs; [ jq playerctl ];
+    text = ''
+      player=""
+      status=""
+      paused_player=""
+
+      while IFS= read -r candidate; do
+        candidate_status="$(playerctl -p "$candidate" status 2>/dev/null || true)"
+        case "$candidate_status" in
+          Playing)
+            player="$candidate"
+            status="$candidate_status"
+            break
+            ;;
+          Paused)
+            [ -n "$paused_player" ] || paused_player="$candidate"
+            ;;
+        esac
+      done < <(playerctl -l 2>/dev/null || true)
+
+      if [ -z "$player" ] && [ -n "$paused_player" ]; then
+        player="$paused_player"
+        status="Paused"
+      fi
+
+      [ -n "$player" ] || exit 0
+
+      artist="$(playerctl -p "$player" metadata artist 2>/dev/null || true)"
+      title="$(playerctl -p "$player" metadata title 2>/dev/null || true)"
+      [ -n "$artist" ] || artist="Unknown artist"
+      [ -n "$title" ] || title="Unknown track"
+
+      jq -cn \
+        --arg text "♪ $artist — $title" \
+        --arg status "''${status,,}" \
+        --arg tooltip "$artist — $title" \
+        '{text:$text,class:$status,tooltip:$tooltip}'
+    '';
+  };
+in
+
 {
   programs.waybar = {
     enable = true;
@@ -18,6 +67,7 @@
 
         modules-left = [
           "sway/workspaces"
+          "custom/now-playing"
         ];
 
         modules-center = [
@@ -54,8 +104,21 @@
         };
 
         "sway/window" = {
-          max-length = 70;
+          max-length = 55;
           separate-outputs = true;
+        };
+
+        "custom/now-playing" = {
+          exec = "${nowPlaying}/bin/waybar-now-playing";
+          return-type = "json";
+          format = "{}";
+          max-length = 42;
+          interval = 2;
+          hide-empty-text = true;
+          on-click = "${pkgs.playerctl}/bin/playerctl play-pause";
+          on-scroll-up = "${pkgs.playerctl}/bin/playerctl previous";
+          on-scroll-down = "${pkgs.playerctl}/bin/playerctl next";
+          tooltip = true;
         };
 
         cpu = {
@@ -106,7 +169,7 @@
         };
 
         "custom/session" = {
-          format = "ฅ ⏻";
+          format = " ";
           tooltip = false;
           on-click = "session-menu";
         };
@@ -194,6 +257,7 @@
       #network,
       #pulseaudio,
       #custom-weather,
+      #custom-now-playing,
       #clock,
       #custom-notifications,
       #tray,
@@ -224,9 +288,23 @@
         color: ${desktopTheme.hex "accent"};
       }
 
+      #custom-now-playing {
+        min-width: 0;
+        margin-right: 3px;
+        color: ${desktopTheme.hex "text"};
+      }
+
+      #custom-now-playing.paused {
+        color: ${desktopTheme.hex "muted"};
+      }
+
       #custom-session {
-        font-family: "Unifont", sans-serif;
-        color: ${desktopTheme.hex "accent"};
+        min-width: 18px;
+        color: ${desktopTheme.hex "text"};
+        background-image: url("${catMark}");
+        background-repeat: no-repeat;
+        background-position: center;
+        background-size: 16px 16px;
       }
 
       #custom-notifications {
@@ -241,7 +319,13 @@
 
       #custom-session:hover {
         color: ${desktopTheme.hex "accent"};
-        background: ${desktopTheme.hex "overlay"};
+        background-color: ${desktopTheme.hex "overlay"};
+        background-image: url("${catMarkHover}");
+      }
+
+      #custom-session:active {
+        color: #FFFFFF;
+        background-image: url("${catMarkActive}");
       }
 
       #custom-nix-generation {

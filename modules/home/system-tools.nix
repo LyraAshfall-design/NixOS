@@ -25,7 +25,7 @@ let
       trap restore_focus EXIT
 
       choice="$(printf '%s\n' "Rebuild" "Generations" "Rollback" "System info" "Services" "Logs" "Open config" |
-        fuzzel --dmenu --keyboard-focus=exclusive --prompt="ฅ System > " --width=34 --lines=7)" || exit 0
+        fuzzel --dmenu --keyboard-focus=exclusive --prompt="System > " --width=34 --lines=7)" || exit 0
       case "$choice" in
         Rebuild) exec kitty --title "NixOS rebuild" fish -lc 'rebuild; read -r' ;;
         Generations) exec kitty --title "NixOS generations" fish -lc 'nix-env --list-generations --profile /nix/var/nix/profiles/system; read -r' ;;
