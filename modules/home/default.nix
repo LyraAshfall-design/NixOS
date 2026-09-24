@@ -21,5 +21,6 @@
     ./desktop-agents.nix
     ./desktop-controls.nix
     ./window-picker.nix
+    ./phone.nix
   ];
 }

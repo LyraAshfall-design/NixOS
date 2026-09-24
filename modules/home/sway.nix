@@ -85,6 +85,9 @@
 
       keybindings = {
         # Applications
+        "Mod4+p" =
+          "exec phone-control";
+
         "Mod4+Return" =
           "exec ${pkgs.kitty}/bin/kitty";
 
