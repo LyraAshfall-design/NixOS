@@ -5,8 +5,10 @@ service restart, compositor reload, logout, suspend, or reboot was performed.
 
 ## Structure
 
-`flake.nix` builds VM and desktop hosts from `configuration.nix`, host modules,
-Home Manager, Noctalia, and the official SilentSDDM module. Shared system desktop services live in
+`flake.nix` composes the desktop from `configuration.nix`, its host module,
+Home Manager, Noctalia, and the official SilentSDDM module. The VM imports
+`modules/base.nix` and `hosts/vm/default.nix` directly, using XFCE without Home
+Manager or Noctalia. Shared system desktop services live in
 `modules/desktop.nix`; Sway system integration is in `modules/desktop/sway.nix`.
 `home/corey.nix` now imports `modules/home/default.nix`, which aggregates the
 small desktop Home Manager modules. Personal identity, applications, and the
@@ -41,7 +43,7 @@ comments and this audit). No Sway command still invokes either shell/compositor.
 
 | Location | Classification and dependency |
 | --- | --- |
-| `flake.nix`, `flake.lock` | Intentional fallback: Noctalia input, locked dependency, module imports for both hosts. |
+| `flake.nix`, `flake.lock` | Intentional fallback: Noctalia input, locked dependency, module imports for the desktop host only. |
 | `modules/desktop.nix` | Intentional fallback: Hyprland/UWSM enablement, Noctalia installation/service, Hyprland-only portal preference. Noctalia startup is conditional on `XDG_CURRENT_DESKTOP=Hyprland`; the current process was not stopped. |
 | `home/corey.nix` | Intentional fallback: compositor enablement, Lua/xdph deployment, `hyprpicker`, Noctalia config deployment, and HYPRCURSOR settings in `uwsm/env-hyprland`. Portal routing mirrors the system configuration for both sessions. |
 | `home/corey/hypr/**` | Intentional fallback: Lua modules, compositor commands/rules, Noctalia controls, UWSM application launching, share picker and portal screencopy configuration. The obsolete autostart module and its import were removed; UWSM handles environment import and session lifecycle. |
@@ -63,7 +65,7 @@ It is imported only through `modules/home/default.nix`. `home/corey.nix` imports
 only that aggregator and Corey-specific `mogledger.nix`; no duplicate desktop
 imports remain. Sway borders, Waybar, Fuzzel, Mako, swaylock, SwayOSD and the
 weather popup consume the same palette; calendar and utilities inherit GTK.
-Kitty includes all 16 ANSI colors. Waybar is a compact 20px top bar with the
+Kitty includes all 16 ANSI colors. Waybar is a compact 25px top bar with the
 existing module order followed by a far-right button invoking `session-menu`.
 Common browser, Qt and Electron settings are system session variables, available
 to both desktops without sourcing UWSM files. Cursor settings remain owned by
@@ -132,7 +134,7 @@ saturation; it penalizes cold hues, neon saturation and excessive brightness.
 Rejected previews/full images report the score breakdown. Defaults near the top
 of the script are tunable through environment variables: `THEME_MIN_SCORE=60`,
 `THEME_SAMPLE_SIZE=32`, `THEME_DEBUG=0`, `MAX_THEME_ATTEMPTS=40`,
-`MAX_SOURCE_ATTEMPTS=4`, `MAX_REDDIT_ATTEMPTS=6`, `MAX_SOURCE_REQUESTS=16`,
+`MAX_SOURCE_ATTEMPTS=4`, `MAX_REDDIT_ATTEMPTS=6`, `MAX_SOURCE_REQUESTS=32`,
 `CURL_CONNECT_TIMEOUT=5`, and `CURL_MAX_TIME=25`. The request/time budgets bound
 search duration; exhausting them exits cleanly without replacing the wallpaper.
 
@@ -188,4 +190,4 @@ nix run ".#nixosConfigurations.nixos-desktop.config.programs.silentSDDM.package'
 The preview cannot verify real authentication or session startup. Test both
 desktop choices during a planned login. Use `THEME_DEBUG=1 ~/.local/bin/wallpaper-next`
 to tune real-image filtering after activation; it deliberately changes wallpaper
-on success. The static greeter woodland image does not follow desktop rotation.
+on success. The static bundled greeter image does not follow desktop rotation.

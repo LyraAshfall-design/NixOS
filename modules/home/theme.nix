@@ -112,142 +112,142 @@ in
   };
 
   config = {
-  _module.args.desktopTheme = {
-    inherit hex rgb;
-    raw = name: lib.removePrefix "#" (hex name);
-  };
+    _module.args.desktopTheme = {
+      inherit hex rgb;
+      raw = name: lib.removePrefix "#" (hex name);
+    };
 
-  wayland.windowManager.sway.config.colors =
-    let
-      state = border: background: text: {
-        border = hex border;
-        background = hex background;
-        text = hex text;
-        indicator = hex border;
-        childBorder = hex border;
+    wayland.windowManager.sway.config.colors =
+      let
+        state = border: background: text: {
+          border = hex border;
+          background = hex background;
+          text = hex text;
+          indicator = hex border;
+          childBorder = hex border;
+        };
+      in {
+        background = hex "mantle";
+        focused = state "accent" "surface" "text";
+        focusedInactive = state "secondary" "surface" "muted";
+        unfocused = state "overlay" "base" "muted";
+        urgent = state "urgent" "urgent" "base";
+        placeholder = state "overlay" "mantle" "muted";
       };
-    in {
-      background = hex "mantle";
-      focused = state "accent" "surface" "text";
-      focusedInactive = state "secondary" "surface" "muted";
-      unfocused = state "overlay" "base" "muted";
-      urgent = state "urgent" "urgent" "base";
-      placeholder = state "overlay" "mantle" "muted";
+
+    home.packages = [ pkgs.qt6Packages.qt6ct ];
+
+    home.pointerCursor = {
+      enable = true;
+      gtk.enable = true;
+      sway.enable = true;
+      x11.enable = true;
+      package = pkgs.bibata-cursors;
+      name = "Bibata-Modern-Classic";
+      size = 24;
     };
 
-  home.packages = [ pkgs.qt6Packages.qt6ct ];
-
-  home.pointerCursor = {
-    enable = true;
-    gtk.enable = true;
-    sway.enable = true;
-    x11.enable = true;
-    package = pkgs.bibata-cursors;
-    name = "Bibata-Modern-Classic";
-    size = 24;
-  };
-
-  gtk = {
-    enable = true;
-    theme = { name = "Adwaita-dark"; package = pkgs.gnome-themes-extra; };
-    inherit iconTheme;
-    gtk3.extraConfig.gtk-application-prefer-dark-theme = true;
-    gtk3.extraCss = gtkCss;
-    gtk4.extraCss = gtkCss + ":root {\n" + lib.concatStrings (lib.mapAttrsToList
-      (name: color: "  --${lib.replaceStrings [ "_" ] [ "-" ] name}: ${hex color};\n")
-      gtkColors) + "}\n";
-  };
-  dconf.settings."org/gnome/desktop/interface".color-scheme = "prefer-dark";
-
-  programs.fuzzel.settings.main.icon-theme = iconTheme.name;
-  # Mako does not follow theme inheritance, so include Papirus explicitly.
-  services.mako.settings.icon-path = lib.concatStringsSep ":" [
-    "${iconTheme.package}/share/icons/${iconTheme.name}"
-    "${iconTheme.package}/share/icons/Papirus"
-  ];
-
-  programs.kitty = {
-    enable = true;
-    settings = {
-      foreground = hex "text";
-      background = hex "base";
-      cursor = hex "text";
-      selection_foreground = hex "base";
-      selection_background = hex "text";
-      background_opacity = "0.82";
-      color0 = hex "surface";
-      color1 = hex "urgent";
-      color2 = hex "sage";
-      color3 = hex "warning";
-      color4 = hex "ansiBlue";
-      color5 = hex "ansiMagenta";
-      color6 = hex "ansiCyan";
-      color7 = hex "text";
-      color8 = hex "brightBlack";
-      color9 = hex "brightRed";
-      color10 = hex "brightGreen";
-      color11 = hex "brightYellow";
-      color12 = hex "brightBlue";
-      color13 = hex "brightMagenta";
-      color14 = hex "brightCyan";
-      color15 = hex "brightWhite";
+    gtk = {
+      enable = true;
+      theme = { name = "Adwaita-dark"; package = pkgs.gnome-themes-extra; };
+      inherit iconTheme;
+      gtk3.extraConfig.gtk-application-prefer-dark-theme = true;
+      gtk3.extraCss = gtkCss;
+      gtk4.extraCss = gtkCss + ":root {\n" + lib.concatStrings (lib.mapAttrsToList
+        (name: color: "  --${lib.replaceStrings [ "_" ] [ "-" ] name}: ${hex color};\n")
+        gtkColors) + "}\n";
     };
-  };
+    dconf.settings."org/gnome/desktop/interface".color-scheme = "prefer-dark";
 
-  xdg.configFile."qt6ct/qt6ct.conf".text = ''
-    [Appearance]
-    color_scheme_path=${qtPalette}
-    custom_palette=true
-    icon_theme=${iconTheme.name}
-    standard_dialogs=default
-    style=Fusion
+    programs.fuzzel.settings.main.icon-theme = iconTheme.name;
+    # Mako does not follow theme inheritance, so include Papirus explicitly.
+    services.mako.settings.icon-path = lib.concatStringsSep ":" [
+      "${iconTheme.package}/share/icons/${iconTheme.name}"
+      "${iconTheme.package}/share/icons/Papirus"
+    ];
 
-    [Fonts]
-    fixed="monospace,9,-1,2,400,0,0,0,0,0,0,0,0,0,0,1,,0,0"
-    general="Sans Serif,9,-1,5,400,0,0,0,0,0,0,0,0,0,0,1,,0,0"
-
-    [Interface]
-    activate_item_on_single_click=1
-    buttonbox_layout=0
-    cursor_flash_time=1000
-    dialog_buttons_have_icons=1
-    double_click_interval=400
-    keyboard_scheme=2
-    menus_have_icons=true
-    show_shortcuts_in_context_menus=true
-    toolbutton_style=4
-    underline_shortcut=1
-    wheel_scroll_lines=3
-
-    [Troubleshooting]
-    force_raster_widgets=1
-  '';
-
-  # The inspected live kdeglobals contains only generated colors, no app settings.
-  xdg.configFile."kdeglobals".text = lib.generators.toINI { } {
-    Icons.Theme = iconTheme.name;
-    KDE.contrast = 4;
-    "Colors:Window" = kdeColors "base";
-    "Colors:View" = kdeColors "mantle";
-    "Colors:Button" = kdeColors "surface";
-    "Colors:Tooltip" = kdeColors "surface";
-    "Colors:Complementary" = kdeColors "mantle";
-    "Colors:Header" = kdeColors "surface";
-    "Colors:Selection" = (kdeColors "accent") // {
-      ForegroundNormal = rgb "base";
-      ForegroundActive = rgb "base";
-      ForegroundInactive = rgb "base";
+    programs.kitty = {
+      enable = true;
+      settings = {
+        foreground = hex "text";
+        background = hex "base";
+        cursor = hex "text";
+        selection_foreground = hex "base";
+        selection_background = hex "text";
+        background_opacity = "0.82";
+        color0 = hex "surface";
+        color1 = hex "urgent";
+        color2 = hex "sage";
+        color3 = hex "warning";
+        color4 = hex "ansiBlue";
+        color5 = hex "ansiMagenta";
+        color6 = hex "ansiCyan";
+        color7 = hex "text";
+        color8 = hex "brightBlack";
+        color9 = hex "brightRed";
+        color10 = hex "brightGreen";
+        color11 = hex "brightYellow";
+        color12 = hex "brightBlue";
+        color13 = hex "brightMagenta";
+        color14 = hex "brightCyan";
+        color15 = hex "brightWhite";
+      };
     };
-    WM = {
-      activeBackground = rgb "surface";
-      activeForeground = rgb "text";
-      inactiveBackground = rgb "base";
-      inactiveForeground = rgb "muted";
-    };
-  };
 
-  # Alacritty is not installed or launched by this configuration. Its only live
-  # setting was a generated theme import; neutralize that without installing it.
-  xdg.configFile."alacritty/alacritty.toml".text = "# Use Alacritty defaults if installed manually.\n";
+    xdg.configFile."qt6ct/qt6ct.conf".text = ''
+      [Appearance]
+      color_scheme_path=${qtPalette}
+      custom_palette=true
+      icon_theme=${iconTheme.name}
+      standard_dialogs=default
+      style=Fusion
+
+      [Fonts]
+      fixed="monospace,9,-1,2,400,0,0,0,0,0,0,0,0,0,0,1,,0,0"
+      general="Sans Serif,9,-1,5,400,0,0,0,0,0,0,0,0,0,0,1,,0,0"
+
+      [Interface]
+      activate_item_on_single_click=1
+      buttonbox_layout=0
+      cursor_flash_time=1000
+      dialog_buttons_have_icons=1
+      double_click_interval=400
+      keyboard_scheme=2
+      menus_have_icons=true
+      show_shortcuts_in_context_menus=true
+      toolbutton_style=4
+      underline_shortcut=1
+      wheel_scroll_lines=3
+
+      [Troubleshooting]
+      force_raster_widgets=1
+    '';
+
+    # The inspected live kdeglobals contains only generated colors, no app settings.
+    xdg.configFile."kdeglobals".text = lib.generators.toINI { } {
+      Icons.Theme = iconTheme.name;
+      KDE.contrast = 4;
+      "Colors:Window" = kdeColors "base";
+      "Colors:View" = kdeColors "mantle";
+      "Colors:Button" = kdeColors "surface";
+      "Colors:Tooltip" = kdeColors "surface";
+      "Colors:Complementary" = kdeColors "mantle";
+      "Colors:Header" = kdeColors "surface";
+      "Colors:Selection" = (kdeColors "accent") // {
+        ForegroundNormal = rgb "base";
+        ForegroundActive = rgb "base";
+        ForegroundInactive = rgb "base";
+      };
+      WM = {
+        activeBackground = rgb "surface";
+        activeForeground = rgb "text";
+        inactiveBackground = rgb "base";
+        inactiveForeground = rgb "muted";
+      };
+    };
+
+    # Alacritty is not installed or launched by this configuration. Its only live
+    # setting was a generated theme import; neutralize that without installing it.
+    xdg.configFile."alacritty/alacritty.toml".text = "# Use Alacritty defaults if installed manually.\n";
   };
 }

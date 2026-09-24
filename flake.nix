@@ -2,7 +2,7 @@
   description = "Corey's NixOS configuration";
 
   inputs = {
-    # Stable NixOS release used by every host in this repo.
+    # Shared nixos-unstable input; flake.lock pins the revision for every host.
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
 
     # Manages Corey's user applications and dotfiles.

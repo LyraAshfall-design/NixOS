@@ -1,10 +1,9 @@
-{ config, pkgs, ... }@args:
+{ ... }:
 
-(import ./modules/base.nix args) // {
-  # Extend the base in place to preserve workstation module ordering.
+{
   imports = [
+    ./modules/base.nix
     ./modules/desktop.nix
-    ./modules/packages.nix
     ./modules/gaming.nix
   ];
 
