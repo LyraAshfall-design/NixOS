@@ -6,6 +6,7 @@
     ./hardware-configuration.nix
     ../../modules/nvidia.nix
     ../../modules/virtualization.nix
+    ../../modules/phone.nix
   ];
 
   networking.hostName = "nixos-desktop";

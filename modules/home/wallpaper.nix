@@ -8,6 +8,7 @@
     coreutils
     gnugrep
     gawk
+    util-linux # flock prevents overlapping wallpaper selections.
   ];
 
   home.file.".local/bin/wallpaper-next" = {
