@@ -1,6 +1,16 @@
-{ pkgs, ... }:
+{ config, lib, pkgs, ... }:
 
 {
+  # Prepare local paths only; pair the phone and share folders in Syncthing later.
+  # Camera/Pictures: receive-only on desktop. Documents/Shared: send & receive.
+  home.activation.phoneSyncDirectories = lib.hm.dag.entryAfter [ "writeBoundary" ] ''
+    run ${pkgs.coreutils}/bin/mkdir -p -- \
+      ${lib.escapeShellArg "${config.home.homeDirectory}/Pictures/Phone/Camera"} \
+      ${lib.escapeShellArg "${config.home.homeDirectory}/Pictures/Phone/Pictures"} \
+      ${lib.escapeShellArg "${config.home.homeDirectory}/Documents/Phone"} \
+      ${lib.escapeShellArg "${config.home.homeDirectory}/Phone/Shared"}
+  '';
+
   home.packages = [
     (pkgs.writeShellApplication {
       name = "phone-control";
