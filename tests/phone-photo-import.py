@@ -9,8 +9,11 @@ import json
 import os
 from pathlib import Path
 import shlex
+import shutil
+import signal
 import subprocess
 import tempfile
+import time
 import unittest
 from unittest.mock import patch
 
@@ -346,11 +349,51 @@ class ImportTests(unittest.TestCase):
 
 
 MOCK = r'''#!/usr/bin/env python3
-import os, pathlib, sys
+import json, os, pathlib, subprocess, sys, time
 root = pathlib.Path(os.environ['FIXTURE'])
 name = pathlib.Path(sys.argv[0]).name
 case = os.environ['CASE']
 with (root/'calls').open('a') as f: f.write(name+' '+ ' '.join(sys.argv[1:])+'\n')
+# Deliberately preserve inherited FDs, like a daemonizing ADB server.
+if name == os.environ.get('PERSIST_FROM') and not (root/'child.pid').exists():
+    child = subprocess.Popen(['sleep', '60'], close_fds=False,
+                             stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                             stderr=subprocess.DEVNULL)
+    (root/'child.pid').write_text(str(child.pid))
+if name == 'jq':
+    os.execv(os.environ['REAL_JQ'], ['jq', *sys.argv[1:]])
+if name == 'swaymsg':
+    if os.environ.get('SWAY_FAIL'): sys.exit(1)
+    if sys.argv[1:] == ['-r', '-t', 'get_tree']:
+        nodes = [json.loads(p.read_text()) for p in root.glob('*.window')]
+        print(json.dumps({'nodes': [], 'floating_nodes': nodes}))
+    else:
+        assert sys.argv[1] == '-q'
+        target = int(sys.argv[2].removeprefix('[con_id=').removesuffix('] kill'))
+        for p in root.glob('*.window'):
+            if json.loads(p.read_text())['id'] == target:
+                p.with_suffix('.close').touch()
+    sys.exit(0)
+if name == 'adb' and os.environ.get('BLOCK_ADB'):
+    (root/'adb.ready').touch()
+    while not (root/'adb.release').exists(): time.sleep(0.01)
+if name == 'scrcpy' and os.environ.get('BLOCK_SCRCPY'):
+    (root/'scrcpy.ready').touch()
+    while not (root/'scrcpy.release').exists(): time.sleep(0.01)
+if name == 'scrcpy' and os.environ.get('RUN_WINDOW'):
+    managed = '--window-title=phone-control' in sys.argv
+    key = 'managed' if managed else 'unrelated'
+    window = root/(key+'.window')
+    assert not window.exists(), 'Duplicate scrcpy window'
+    pending = root/(key+'.pending')
+    pending.write_text(json.dumps({'type': 'con', 'id': os.getpid(),
+                                   'name': 'phone-control' if managed else 'Other phone'}))
+    pending.replace(window)
+    while not (root/(key+'.close')).exists(): time.sleep(0.01)
+    window.unlink()
+    if managed and os.environ.get('BLOCK_SHUTDOWN'):
+        (root/'shutdown.ready').touch()
+        while not (root/'shutdown.release').exists(): time.sleep(0.01)
 if name == 'adb':
     if sys.argv[1] == 'devices':
         if case == 'adb-fail': sys.exit(1)
@@ -370,22 +413,161 @@ elif name == 'scrcpy' and case == 'scrcpy-fail': sys.exit(1)
 
 
 class DiscoveryTests(unittest.TestCase):
+    def wait_for(self, path):
+        deadline = time.monotonic() + 5
+        while not path.exists() and time.monotonic() < deadline:
+            time.sleep(0.01)
+        self.assertTrue(path.exists(), str(path))
+
+    def control_fixture(self, root, **extra):
+        for name in ('adb', 'avahi-browse', 'scrcpy', 'notify-send', 'swaymsg', 'jq'):
+            p = root / name
+            p.write_text(MOCK)
+            p.chmod(0o755)
+        for name in ('phone-adb-connect', 'phone-control'):
+            p = root / name
+            p.write_text('#!/usr/bin/env bash\nset -euo pipefail\n' + (SCRIPTS / (name + '.sh')).read_text())
+            p.chmod(0o755)
+        return dict(os.environ, PATH=str(root)+':'+os.environ['PATH'],
+                    FIXTURE=str(root), XDG_RUNTIME_DIR=str(root), REAL_JQ=shutil.which('jq'), **extra)
+
+    def test_toggle_open_close_reopen_preserves_unrelated_scrcpy(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            env = self.control_fixture(root, CASE='connected', RUN_WINDOW='1', BLOCK_SHUTDOWN='1')
+            unrelated = subprocess.Popen([str(root/'scrcpy'), '--serial=other'], env=env)
+            launcher = None
+            try:
+                self.wait_for(root/'unrelated.window')
+                for cycle in range(2):
+                    for name in ('managed.close', 'shutdown.ready', 'shutdown.release'):
+                        (root/name).unlink(missing_ok=True)
+                    launcher = subprocess.Popen([str(root/'phone-control')], env=env)
+                    self.wait_for(root/'managed.window')
+                    pid = json.loads((root/'managed.window').read_text())['id']
+                    calls = (root/'calls').read_text()
+                    result = subprocess.run([str(root/'phone-control')], env=env,
+                                            capture_output=True, timeout=5)
+                    self.assertEqual(result.returncode, 0, result.stderr)
+                    close_calls = (root/'calls').read_text()[len(calls):]
+                    self.assertIn(f'swaymsg -q [con_id={pid}] kill', close_calls)
+                    self.assertNotIn('adb ', close_calls)
+                    self.assertNotIn('scrcpy ', close_calls)
+                    self.wait_for(root/'shutdown.ready')
+                    # The window is gone, but launch remains excluded until scrcpy exits.
+                    result = subprocess.run([str(root/'phone-control')], env=env,
+                                            capture_output=True, timeout=5)
+                    self.assertEqual(result.returncode, 0)
+                    self.assertEqual((root/'calls').read_text().count('scrcpy --serial=192.'), cycle + 1)
+                    (root/'shutdown.release').touch()
+                    self.assertEqual(launcher.wait(timeout=5), 0)
+                    self.assertFalse(Path(f'/proc/{pid}').exists(), 'scrcpy was not reaped')
+                    with (root/'phone-control.lock').open('a') as lock:
+                        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                    self.assertIsNone(unrelated.poll())
+                    self.assertFalse((root/'unrelated.close').exists())
+            finally:
+                for name in ('managed.close', 'unrelated.close', 'shutdown.release'):
+                    (root/name).touch()
+                if launcher is not None:
+                    launcher.wait(timeout=5)
+                unrelated.wait(timeout=5)
+
+    def test_rapid_presses_during_connection_and_window_startup(self):
+        for stage in ('adb', 'scrcpy'):
+            with self.subTest(stage=stage), tempfile.TemporaryDirectory() as tmp:
+                root = Path(tmp)
+                env = self.control_fixture(root, CASE='connected', **{'BLOCK_'+stage.upper(): '1'})
+                launcher = subprocess.Popen([str(root/'phone-control')], env=env)
+                repeats = []
+                try:
+                    self.wait_for(root/(stage+'.ready'))
+                    calls = (root/'calls').read_text()
+                    repeats = [subprocess.Popen([str(root/'phone-control')], env=env) for _ in range(8)]
+                    for repeat in repeats:
+                        self.assertEqual(repeat.wait(timeout=5), 0)
+                    new_calls = (root/'calls').read_text()[len(calls):].splitlines()
+                    self.assertEqual(len(new_calls), 16)
+                    self.assertTrue(all(line.startswith(('swaymsg ', 'jq ')) for line in new_calls))
+                finally:
+                    (root/(stage+'.release')).touch()
+                    for repeat in repeats:
+                        repeat.wait(timeout=5)
+                    launcher.wait(timeout=5)
+                self.assertEqual(launcher.returncode, 0)
+                self.assertEqual((root/'calls').read_text().count('scrcpy --serial='), 1)
+
+    def test_sway_failure_does_not_launch_or_contact_adb(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            env = self.control_fixture(root, CASE='connected', SWAY_FAIL='1')
+            result = subprocess.run([str(root/'phone-control')], env=env, capture_output=True, timeout=5)
+            self.assertEqual(result.returncode, 1)
+            calls = (root/'calls').read_text()
+            self.assertIn('notify-send', calls)
+            self.assertNotIn('adb ', calls)
+            self.assertNotIn('scrcpy ', calls)
+
+    def test_persistent_children_do_not_retain_control_lock(self):
+        for command, case in (('adb', 'discover'), ('scrcpy', 'connected'),
+                              ('notify-send', 'adb-fail'), ('swaymsg', 'connected'),
+                              ('jq', 'connected')):
+            with self.subTest(command=command), tempfile.TemporaryDirectory() as tmp:
+                root = Path(tmp)
+                env = self.control_fixture(root, CASE=case, PERSIST_FROM=command)
+                try:
+                    result = subprocess.run([str(root/'phone-control')], env=env,
+                                            capture_output=True, timeout=10)
+                    self.assertEqual(result.returncode, 1 if case == 'adb-fail' else 0)
+                    pid = int((root/'child.pid').read_text())
+                    os.kill(pid, 0)  # The daemon outlives the launcher.
+                    lock_path = root/'phone-control.lock'
+                    inherited = [p.resolve() for p in Path(f'/proc/{pid}/fd').iterdir()]
+                    self.assertNotIn(lock_path, inherited)
+                    with lock_path.open('a') as lock:
+                        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                    # A successful exit alone is insufficient: duplicates exit 0 too.
+                    (root/'calls').unlink()
+                    result = subprocess.run([str(root/'phone-control')],
+                                            env=dict(env, CASE='connected'),
+                                            capture_output=True, timeout=10)
+                    self.assertEqual(result.returncode, 0)
+                    self.assertIn('scrcpy --serial=', (root/'calls').read_text())
+                finally:
+                    if (root/'child.pid').exists():
+                        os.kill(int((root/'child.pid').read_text()), signal.SIGTERM)
+
+    def test_duplicate_is_excluded_during_scrcpy(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            env = self.control_fixture(root, CASE='connected', BLOCK_SCRCPY='1')
+            launcher = subprocess.Popen([str(root/'phone-control')], env=env,
+                                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            try:
+                deadline = time.monotonic() + 5
+                while not (root/'scrcpy.ready').exists() and time.monotonic() < deadline:
+                    time.sleep(0.01)
+                self.assertTrue((root/'scrcpy.ready').exists())
+                calls = (root/'calls').read_text()
+                result = subprocess.run([str(root/'phone-control')], env=env,
+                                        capture_output=True, timeout=5)
+                self.assertEqual(result.returncode, 0)
+                self.assertEqual([line.split()[0] for line in
+                                  (root/'calls').read_text()[len(calls):].splitlines()], ['swaymsg', 'jq'])
+            finally:
+                (root/'scrcpy.release').touch()
+                launcher.wait(timeout=5)
+            self.assertEqual(launcher.returncode, 0)
+
     def test_phone_control_regression(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            for name in ('adb', 'avahi-browse', 'scrcpy', 'notify-send'):
-                p = root / name
-                p.write_text(MOCK)
-                p.chmod(0o755)
-            for name in ('phone-adb-connect', 'phone-control'):
-                p = root / name
-                p.write_text('#!/usr/bin/env bash\nset -euo pipefail\n' + (SCRIPTS / (name + '.sh')).read_text())
-                p.chmod(0o755)
+            env = self.control_fixture(root, CASE='connected')
             for case in ('connected','mdns-serial','discover','missing','connect-fail','multiple','adb-fail','scrcpy-fail'):
                 with self.subTest(case=case):
                     for name in ('calls','connected'):
                         (root/name).unlink(missing_ok=True)
-                    env = dict(os.environ, PATH=tmp+':'+os.environ['PATH'], FIXTURE=tmp, XDG_RUNTIME_DIR=tmp, CASE=case)
+                    env = dict(env, CASE=case)
                     result = subprocess.run([str(root/'phone-control')], env=env, capture_output=True)
                     calls = (root/'calls').read_text()
                     success = case in ('connected','mdns-serial','discover')
@@ -402,7 +584,8 @@ class DiscoveryTests(unittest.TestCase):
                 fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
                 result = subprocess.run([str(root/'phone-control')], env=env, capture_output=True)
                 self.assertEqual(result.returncode, 0)
-                self.assertFalse((root/'calls').exists())
+                self.assertEqual([line.split()[0] for line in (root/'calls').read_text().splitlines()],
+                                 ['swaymsg', 'jq'])
 
 
 if __name__ == '__main__':

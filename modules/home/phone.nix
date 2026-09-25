@@ -8,7 +8,7 @@ let
   };
   phoneControl = pkgs.writeShellApplication {
     name = "phone-control";
-    runtimeInputs = with pkgs; [ adbConnect scrcpy libnotify util-linux ];
+    runtimeInputs = with pkgs; [ adbConnect scrcpy libnotify util-linux sway jq ];
     text = builtins.readFile ./phone/phone-control.sh;
   };
   photoImport = pkgs.writeShellApplication {
