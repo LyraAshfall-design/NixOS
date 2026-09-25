@@ -23,31 +23,39 @@
     };
   };
 
-  outputs = { nixpkgs, home-manager, noctalia, silent-sddm, ... }: {
-    nixosConfigurations = {
-      # Minimal QEMU/libvirt lab guest.
-      nixos-vm = nixpkgs.lib.nixosSystem {
-        system = "x86_64-linux";
+  outputs =
+    {
+      nixpkgs,
+      home-manager,
+      noctalia,
+      silent-sddm,
+      ...
+    }:
+    {
+      nixosConfigurations = {
+        # Minimal QEMU/libvirt lab guest.
+        nixos-vm = nixpkgs.lib.nixosSystem {
+          system = "x86_64-linux";
 
-        modules = [
-          ./modules/base.nix
-          ./hosts/vm/default.nix
-        ];
-      };
+          modules = [
+            ./modules/core/base.nix
+            ./hosts/vm/default.nix
+          ];
+        };
 
-      # Physical desktop.
-      nixos-desktop = nixpkgs.lib.nixosSystem {
-        system = "x86_64-linux";
+        # Physical desktop.
+        nixos-desktop = nixpkgs.lib.nixosSystem {
+          system = "x86_64-linux";
 
-        modules = [
-          ./configuration.nix
-          ./hosts/desktop/default.nix
+          modules = [
+            ./configuration.nix
+            ./hosts/desktop/default.nix
 
-          home-manager.nixosModules.home-manager
-          noctalia.nixosModules.default
-          silent-sddm.nixosModules.default
-        ];
+            home-manager.nixosModules.home-manager
+            noctalia.nixosModules.default
+            silent-sddm.nixosModules.default
+          ];
+        };
       };
     };
-  };
 }

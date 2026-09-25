@@ -128,7 +128,7 @@
 
   # ---------------------------------------------------------------------------
   # UWSM environment for the retained Hyprland fallback only.
-  # Common application settings live in modules/desktop.nix.
+  # Common application settings live in modules/desktop/default.nix.
   # ---------------------------------------------------------------------------
 
   xdg.configFile."uwsm/env-hyprland".text = ''

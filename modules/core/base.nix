@@ -30,7 +30,6 @@
   # Deduplicate identical files in the Nix store.
   nix.optimise.automatic = true;
 
-
   # NetworkManager handles wired and wireless networking.
   networking.networkmanager.enable = true;
 

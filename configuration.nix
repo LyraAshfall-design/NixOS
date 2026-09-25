@@ -2,8 +2,8 @@
 
 {
   imports = [
-    ./modules/base.nix
-    ./modules/desktop.nix
+    ./modules/core/base.nix
+    ./modules/desktop/default.nix
     ./modules/gaming.nix
   ];
 

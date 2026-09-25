@@ -1,12 +1,18 @@
 { pkgs, ... }:
 
 {
-  imports = [ ./desktop/sddm.nix ./desktop/sway.nix ];
+  imports = [
+    ./sddm.nix
+    ./sway.nix
+  ];
 
   # File management only; this does not enable the XFCE desktop.
   programs.thunar = {
     enable = true;
-    plugins = with pkgs; [ thunar-archive-plugin thunar-volman ];
+    plugins = with pkgs; [
+      thunar-archive-plugin
+      thunar-volman
+    ];
   };
   services.gvfs.enable = true;
   services.tumbler.enable = true;

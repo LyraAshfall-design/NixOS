@@ -7,9 +7,9 @@ service restart, compositor reload, logout, suspend, or reboot was performed.
 
 `flake.nix` composes the desktop from `configuration.nix`, its host module,
 Home Manager, Noctalia, and the official SilentSDDM module. The VM imports
-`modules/base.nix` and `hosts/vm/default.nix` directly, using XFCE without Home
+`modules/core/base.nix` and `hosts/vm/default.nix` directly, using XFCE without Home
 Manager or Noctalia. Shared system desktop services live in
-`modules/desktop.nix`; Sway system integration is in `modules/desktop/sway.nix`.
+`modules/desktop/default.nix`; Sway system integration is in `modules/desktop/sway.nix`.
 `home/corey.nix` now imports `modules/home/default.nix`, which aggregates the
 small desktop Home Manager modules. Personal identity, applications, and the
 retained Hyprland configuration remain in `home/corey.nix`.
@@ -44,7 +44,7 @@ comments and this audit). No Sway command still invokes either shell/compositor.
 | Location | Classification and dependency |
 | --- | --- |
 | `flake.nix`, `flake.lock` | Intentional fallback: Noctalia input, locked dependency, module imports for the desktop host only. |
-| `modules/desktop.nix` | Intentional fallback: Hyprland/UWSM enablement, Noctalia installation/service, Hyprland-only portal preference. Noctalia startup is conditional on `XDG_CURRENT_DESKTOP=Hyprland`; the current process was not stopped. |
+| `modules/desktop/default.nix` | Intentional fallback: Hyprland/UWSM enablement, Noctalia installation/service, Hyprland-only portal preference. Noctalia startup is conditional on `XDG_CURRENT_DESKTOP=Hyprland`; the current process was not stopped. |
 | `home/corey.nix` | Intentional fallback: compositor enablement, Lua/xdph deployment, `hyprpicker`, Noctalia config deployment, and HYPRCURSOR settings in `uwsm/env-hyprland`. Portal routing mirrors the system configuration for both sessions. |
 | `home/corey/hypr/**` | Intentional fallback: Lua modules, compositor commands/rules, Noctalia controls, UWSM application launching, share picker and portal screencopy configuration. The obsolete autostart module and its import were removed; UWSM handles environment import and session lifecycle. |
 | `home/corey/noctalia/config.toml` | Intentional fallback: shell, lockscreen, greeter sync and internal shell palette. All shared application template generators are disabled; shared themes belong to Home Manager. |

@@ -4,10 +4,10 @@
   # System modules specific to the physical desktop.
   imports = [
     ./hardware-configuration.nix
-    ../../modules/nvidia.nix
+    ../../modules/desktop/nvidia.nix
     ../../modules/virtualization.nix
-    ../../modules/phone.nix
-    ../../modules/tailscale.nix
+    ../../modules/desktop/phone.nix
+    ../../modules/services/tailscale.nix
   ];
 
   networking.hostName = "nixos-desktop";
