@@ -14,7 +14,7 @@
   networking.hostName = "nixos-desktop";
 
   users.users.corey.openssh.authorizedKeys.keys = [
-    "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIHjllgndoGDQ3RbrHTrm8wK+OeQkFNQZZpUYlOfXppaw coreys-s23"
+    "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIJgINYP9Vr8VHhbB4Wk7wEk8x5i/6rLi5e2uAULFhrZT coreys-s23"
   ];
 
   # Ordinary OpenSSH over Tailscale; no SSH opening on LAN/WAN interfaces.
