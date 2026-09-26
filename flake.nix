@@ -11,6 +11,11 @@
       inputs.nixpkgs.follows = "nixpkgs";
     };
 
+    disko = {
+      url = "github:nix-community/disko";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
+
     # Hyprland desktop shell/bar.
     noctalia = {
       url = "github:noctalia-dev/noctalia";
@@ -27,6 +32,7 @@
     {
       nixpkgs,
       home-manager,
+      disko,
       noctalia,
       silent-sddm,
       ...
@@ -40,6 +46,9 @@
           modules = [
             ./modules/core/base.nix
             ./hosts/vm/default.nix
+
+            disko.nixosModules.disko
+            home-manager.nixosModules.home-manager
           ];
         };
 
