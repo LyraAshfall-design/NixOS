@@ -33,19 +33,6 @@
   # NetworkManager handles wired and wireless networking.
   networking.networkmanager.enable = true;
 
-  # Remote shell access.
-  # Password authentication is enabled while building/testing the system.
-  # We can switch this to SSH keys later.
-  services.openssh = {
-    enable = true;
-    openFirewall = true;
-
-    settings = {
-      PasswordAuthentication = true;
-      PermitRootLogin = "no";
-    };
-  };
-
   # Regional settings.
   time.timeZone = "America/Vancouver";
   i18n.defaultLocale = "en_CA.UTF-8";
