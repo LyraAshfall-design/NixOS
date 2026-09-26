@@ -5,6 +5,7 @@
     disk.main = {
       type = "disk";
       device = "/dev/vda";
+      imageSize = "32G";
       content = {
         type = "gpt";
         partitions = {
