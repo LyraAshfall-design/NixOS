@@ -354,7 +354,8 @@ root = pathlib.Path(os.environ['FIXTURE'])
 name = pathlib.Path(sys.argv[0]).name
 case = os.environ['CASE']
 with (root/'sdl-env').open('a') as f:
-    f.write(json.dumps([name, os.environ.get('SDL_VIDEODRIVER')])+'\n')
+    f.write(json.dumps([name, os.environ.get('SDL_VIDEODRIVER'),
+                       os.environ.get('LIBGL_ALWAYS_SOFTWARE')])+'\n')
 with (root/'calls').open('a') as f: f.write(name+' '+ ' '.join(sys.argv[1:])+'\n')
 # Deliberately preserve inherited FDs, like a daemonizing ADB server.
 if name == os.environ.get('PERSIST_FROM') and not (root/'child.pid').exists():
@@ -415,24 +416,28 @@ elif name == 'scrcpy' and case == 'scrcpy-fail': sys.exit(1)
 
 
 class DiscoveryTests(unittest.TestCase):
-    def test_scrcpy_wayland_backend_is_scoped_to_invocation(self):
+    def test_scrcpy_preserves_rendering_environment(self):
         for inherited in (None, 'x11'):
             for case in ('connected', 'scrcpy-fail'):
                 with self.subTest(inherited=inherited, case=case), tempfile.TemporaryDirectory() as tmp:
                     root = Path(tmp)
                     env = self.control_fixture(root, CASE=case)
                     env.pop('SDL_VIDEODRIVER', None)
+                    env.pop('LIBGL_ALWAYS_SOFTWARE', None)
                     if inherited is not None:
                         env['SDL_VIDEODRIVER'] = inherited
+                        env['LIBGL_ALWAYS_SOFTWARE'] = '0'
                     result = subprocess.run([str(root/'phone-control')], env=env,
                                             capture_output=True, timeout=5)
                     self.assertEqual(result.returncode, 0 if case == 'connected' else 1)
                     observed = [json.loads(line) for line in (root/'sdl-env').read_text().splitlines()]
-                    self.assertIn(['scrcpy', 'wayland'], observed)
+                    original_gl = env.get('LIBGL_ALWAYS_SOFTWARE')
+                    self.assertIn(['scrcpy', inherited, original_gl], observed)
                     if case == 'scrcpy-fail':
-                        self.assertIn(['notify-send', inherited], observed)
-                    for name, backend in observed:
-                        self.assertEqual(backend, 'wayland' if name == 'scrcpy' else inherited)
+                        self.assertIn(['notify-send', inherited, original_gl], observed)
+                    for name, backend, software_gl in observed:
+                        self.assertEqual(backend, inherited, name)
+                        self.assertEqual(software_gl, original_gl, name)
 
     def wait_for(self, path):
         deadline = time.monotonic() + 5
