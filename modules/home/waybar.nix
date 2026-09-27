@@ -2,13 +2,18 @@
 
 let
   catMark = ../../assets/theme/cat-mark.svg;
-  catMarkHover = pkgs.writeText "cat-mark-hover.svg"
-    (builtins.replaceStrings [ "#E8DCCB" ] [ "#D19A66" ] (builtins.readFile catMark));
-  catMarkActive = pkgs.writeText "cat-mark-active.svg"
-    (builtins.replaceStrings [ "#E8DCCB" ] [ "#FFFFFF" ] (builtins.readFile catMark));
+  catMarkHover = pkgs.writeText "cat-mark-hover.svg" (
+    builtins.replaceStrings [ "#E8DCCB" ] [ "#D19A66" ] (builtins.readFile catMark)
+  );
+  catMarkActive = pkgs.writeText "cat-mark-active.svg" (
+    builtins.replaceStrings [ "#E8DCCB" ] [ "#FFFFFF" ] (builtins.readFile catMark)
+  );
   nowPlaying = pkgs.writeShellApplication {
     name = "waybar-now-playing";
-    runtimeInputs = with pkgs; [ jq playerctl ];
+    runtimeInputs = with pkgs; [
+      jq
+      playerctl
+    ];
     text = ''
       player=""
       status=""
@@ -34,6 +39,12 @@ let
       fi
 
       [ -n "$player" ] || exit 0
+
+      # Use the same player selection for display and controls. Bare playerctl
+      # commands can target a different (paused) player when several are open.
+      if [ "$#" -gt 0 ]; then
+        exec playerctl -p "$player" "$@"
+      fi
 
       artist="$(playerctl -p "$player" metadata artist 2>/dev/null || true)"
       title="$(playerctl -p "$player" metadata title 2>/dev/null || true)"
@@ -113,11 +124,12 @@ in
           return-type = "json";
           format = "{}";
           max-length = 42;
+          escape = true;
           interval = 2;
           hide-empty-text = true;
-          on-click = "${pkgs.playerctl}/bin/playerctl play-pause";
-          on-scroll-up = "${pkgs.playerctl}/bin/playerctl previous";
-          on-scroll-down = "${pkgs.playerctl}/bin/playerctl next";
+          on-click = "${nowPlaying}/bin/waybar-now-playing play-pause";
+          on-scroll-up = "${nowPlaying}/bin/waybar-now-playing previous";
+          on-scroll-down = "${nowPlaying}/bin/waybar-now-playing next";
           tooltip = true;
         };
 

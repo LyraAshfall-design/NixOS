@@ -41,7 +41,6 @@
     BROWSER = "firefox";
     QT_QPA_PLATFORM = "wayland;xcb";
     QT_QPA_PLATFORMTHEME = "qt6ct";
-    ELECTRON_OZONE_PLATFORM_HINT = "auto";
   };
 
   # Credential storage for graphical applications.

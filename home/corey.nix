@@ -1,4 +1,4 @@
-{ pkgs, config, osConfig, ... }:
+{ pkgs, config, ... }:
 
 {
   # Corey's background services.
@@ -52,7 +52,9 @@
     #   nixos-desktop -> .#nixos-desktop
     functions = {
       rebuild = ''
-        if sudo nixos-rebuild switch --flake ~/nixos-config#(hostname)
+        sudo nixos-rebuild switch --flake ~/nixos-config#(hostname)
+        set -l rebuild_status $status
+        if test $rebuild_status -eq 0
           set generation (readlink /nix/var/nix/profiles/system | string match -r -g 'system-([0-9]+)-' | head -n1)
           if test -z "$generation"
             set generation unknown
@@ -61,12 +63,12 @@
           return 0
         end
 
-        notify-send -u critical -a NixOS "System rebuild failed" "The configuration was not activated. Check the terminal output."
-        return 1
+        notify-send -u critical -a NixOS "System rebuild failed" "Check the terminal output for errors and activation status."
+        return $rebuild_status
       '';
 
       update = ''
-        cd ~/nixos-config
+        cd ~/nixos-config; or return
         nix flake update; or return
         rebuild
       '';
@@ -106,6 +108,8 @@
   wayland.windowManager.hyprland = {
     enable = true;
     package = null;
+    # NixOS owns portal backends and routing, including XFCE in the lab VM.
+    portalPackage = null;
 
     # The imported configuration is written using Hyprland's Lua support.
     configType = "lua";
@@ -123,8 +127,7 @@
   };
 
   # Hyprland desktop portal configuration.
-  xdg.configFile."hypr/xdph.conf".source =
-    ./corey/hypr/xdph.conf;
+  xdg.configFile."hypr/xdph.conf".source = ./corey/hypr/xdph.conf;
 
   # ---------------------------------------------------------------------------
   # UWSM environment for the retained Hyprland fallback only.
@@ -140,10 +143,5 @@
   # Noctalia
   # ---------------------------------------------------------------------------
 
-  xdg.configFile."noctalia/config.toml".source =
-    ./corey/noctalia/config.toml;
-
-  # Portal routing is owned by the NixOS desktop modules for both sessions.
-  # Mirror it at user scope because the fallback compositor enables HM portals.
-  xdg.portal.config = osConfig.xdg.portal.config;
+  xdg.configFile."noctalia/config.toml".source = ./corey/noctalia/config.toml;
 }
