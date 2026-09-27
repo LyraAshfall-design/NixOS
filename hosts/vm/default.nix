@@ -9,6 +9,10 @@
 
   networking.hostName = "nixos-vm";
 
+  users.users.corey.openssh.authorizedKeys.keys = [
+    "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAfnUJ4Vwbva5t8oC9mNTwNlNfy3ZL+uCxUy2l4dJVlA corey@nixos-desktop"
+  ];
+
   # Preserve the lab VM's existing SSH access, formerly in the shared base.
   # The desktop's key-only/Tailscale policy is enabled separately.
   services.openssh = {
