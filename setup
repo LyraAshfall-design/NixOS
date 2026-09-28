@@ -1,0 +1,355 @@
+#!/usr/bin/env bash
+# Local live-ISO installer. Never run this through tee, a transcript, or bash -x.
+set +x
+set -Eeuo pipefail
+umask 077
+
+usage() {
+  cat <<'EOF'
+Usage: ./setup [--check] <host>
+       ./setup --help
+
+  vm       nixos-vm: disposable QEMU/KVM guest, /dev/vda, UEFI, at least 32 GiB
+  desktop  nixos-desktop: refused until a reviewed physical Disko layout exists
+  laptop   not implemented
+
+Run installation as root from a NixOS live installer with an interactive terminal.
+--check may run without root: evaluates the pinned configuration and inspects the
+disk, but never builds/runs Disko, mounts, installs, or changes passwords. Nix may
+fetch pinned sources into its store. Missing/unsafe prerequisites are failures.
+Installation ERASES the selected disk after an exact typed confirmation.
+No automatic reboot or automatic recovery/unmount is performed.
+EOF
+}
+
+die() { printf 'setup: %s\n' "$*" >&2; exit 1; }
+
+# Add future implemented hosts here; never interpolate arbitrary user input.
+select_host() {
+  case "$1" in
+    vm) target=nixos-vm ;;
+    desktop) target=nixos-desktop ;;
+    laptop|server) die "Host '$1' is not implemented in this repository." ;;
+    *) die "Unknown host '$1'. Use --help for supported names." ;;
+  esac
+}
+
+nix_cmd() { nix --extra-experimental-features 'nix-command flakes' "$@"; }
+require_root() { (( EUID == 0 )) || die 'Installation requires root: sudo ./setup <host>'; }
+require_terminal() {
+  [[ -t 0 && -t 1 && -t 2 ]] || die 'Installation requires an interactive terminal, without redirection.'
+}
+require_uefi() { [[ -d /sys/firmware/efi ]] || die 'Boot the live installer in UEFI mode.'; }
+require_vm() {
+  local virtualization
+  [[ "$target" == nixos-vm ]] || return 0
+  command -v systemd-detect-virt >/dev/null || die 'Missing systemd-detect-virt; cannot verify the VM environment.'
+  virtualization=$(systemd-detect-virt) ||
+    die 'vm requires a disposable QEMU/KVM guest with no valuable disks or host block-device passthrough; virtualization detection failed.'
+  case "$virtualization" in
+    qemu|kvm) ;;
+    *) die "Unsupported virtualization '$virtualization': vm requires a disposable QEMU/KVM guest with no valuable disks or host block-device passthrough." ;;
+  esac
+  # Detection is only a guard against the wrong environment, not proof that
+  # /dev/vda is disposable. The operator must provide an isolated fresh guest.
+}
+is_block_device() { [[ -b "$1" ]]; }
+
+evaluate_plan() {
+  # Freeze repository + locked inputs before confirmation. All later commands
+  # use this store snapshot, never a working tree that can change mid-install.
+  snapshot=$(nix_cmd flake archive --json --no-update-lock-file --no-write-lock-file "$repo" |
+    jq -er '.path | select(startswith("/nix/store/"))')
+  nix_cmd eval --json --no-update-lock-file "$snapshot#nixosConfigurations" \
+    --apply builtins.attrNames | jq -e --arg host "$target" 'index($host) != null' >/dev/null ||
+    die "Flake configuration '$target' does not exist."
+  # Nix attribute interpolation below must reach Nix verbatim, not Bash.
+  # shellcheck disable=SC2016
+  plan=$(nix_cmd eval --json --no-update-lock-file "$snapshot#nixosConfigurations.$target.config" --apply '
+    c: let
+      hasDisko = c ? disko && c.disko.enableConfig;
+      disks = if hasDisko then builtins.attrValues c.disko.devices.disk else [];
+    in {
+      # Force full system evaluation, including assertions, without building it.
+      systemDrv = c.system.build.toplevel.drvPath;
+      diskoDrv = if hasDisko && disks != [] then c.system.build.destroyFormatMount.drvPath else null;
+      platform = c.nixpkgs.hostPlatform.system;
+      hostname = c.networking.hostName;
+      uefi = c.boot.loader.systemd-boot.enable;
+      esp = c.boot.loader.efi.efiSysMountPoint;
+      mutableUser = c.users.mutableUsers && c.users.users.corey.isNormalUser;
+      passwordUnmanaged = builtins.all (v: v == null) (map
+        (key: c.users.users.corey.${key})
+        [ "password" "hashedPassword" "hashedPasswordFile" "initialPassword" "initialHashedPassword" ]);
+      inherit hasDisko;
+      root = if hasDisko then c.disko.rootMountPoint else null;
+      otherDevices = if hasDisko then builtins.filter (key:
+        builtins.substring 0 1 key != "_" && key != "disk" && c.disko.devices.${key} != {}
+      ) (builtins.attrNames c.disko.devices) else [];
+      disks = map (d: {
+        inherit (d) device destroy;
+        contentDevice = d.content.device or null;
+        type = d.content.type or null;
+        partitions = map (p: {
+          inherit (p) device label type;
+          filesystemDevice = p.content.device or null;
+          contentType = p.content.type or null;
+          format = p.content.format or null;
+          mountpoint = p.content.mountpoint or null;
+        }) (builtins.attrValues (d.content.partitions or {}));
+      }) disks;
+      filesystems = builtins.mapAttrs (_: f: { inherit (f) device fsType; }) c.fileSystems;
+    }')
+}
+
+validate_plan() {
+  jq -e '.hasDisko' <<<"$plan" >/dev/null ||
+    die "$target is not install-ready: no enabled Disko definition. Physical disks require a reviewed /dev/disk/by-id/... target."
+  jq -e '.root == "/mnt" and .uefi and .esp == "/boot" and
+    .mutableUser and .passwordUnmanaged and .otherDevices == [] and
+    (.disks | length) == 1 and .disks[0].destroy and .disks[0].type == "gpt" and
+    .disks[0].contentDevice == .disks[0].device and
+    (.disks[0].partitions | length) == 2 and
+    ([.disks[0].partitions[].label] | unique | length) == 2 and
+    ([.disks[0].partitions[].device] | unique | length) == 2 and
+    ([.filesystems[].device] | unique | length) == 2 and
+    ([.disks[0].partitions[].mountpoint] | sort) == ["/", "/boot"] and
+    (.filesystems | keys) == ["/", "/boot"] and
+    all(.disks[0].partitions[]; .contentType == "filesystem" and
+      .filesystemDevice == .device and
+      .device == ("/dev/disk/by-partlabel/" + .label) and
+      (.label | test("^[A-Za-z0-9_-]+$")) and
+      (if .mountpoint == "/boot" then .format == "vfat" and .type == "EF00"
+       else .format == "ext4" end)) and
+    (. as $p | all(.disks[0].partitions[];
+      $p.filesystems[.mountpoint].device == .device and
+      $p.filesystems[.mountpoint].fsType == .format))' <<<"$plan" >/dev/null ||
+    die 'Unsupported/ambiguous install plan. Review disk count, GPT root/ESP layout, mount paths, and mutable Corey password policy.'
+  [[ "$(jq -r .platform <<<"$plan")" == "$(uname -m)-linux" ]] ||
+    die 'Cross-architecture installation is not supported.'
+  disk=$(jq -er '.disks[0].device' <<<"$plan")
+  if [[ "$target" == nixos-vm ]]; then
+    [[ "$disk" == /dev/vda ]] || die 'The reviewed VM target must remain /dev/vda.'
+  else
+    [[ "$disk" == /dev/disk/by-id/* ]] || die 'Physical targets must use /dev/disk/by-id/... .'
+  fi
+  printf 'Host: %s (%s)\nFlake: %s#%s\nPlanned disk: %s\n' \
+    "$friendly" "$(jq -r .hostname <<<"$plan")" "$snapshot" "$target" "$disk"
+}
+
+probe_disk() {
+  is_block_device "$disk" || die "Target disk is missing or is not a block device: $disk"
+  resolved=$(readlink -e -- "$disk")
+  disk_info=$(lsblk --json --tree --bytes --paths --output PATH,KNAME,TYPE,SIZE,RO,MODEL,SERIAL,WWN,MAJ:MIN,MOUNTPOINTS -- "$resolved") || die 'Cannot inspect target disk.'
+  jq -e --arg resolved "$resolved" '
+    (.blockdevices | type == "array" and length == 1) and
+    .blockdevices[0].path == $resolved and .blockdevices[0].type == "disk" and
+    .blockdevices[0].ro == false and (.blockdevices[0].size | type == "number" and . > 0) and
+    (.blockdevices[0]["maj:min"] | type == "string" and test("^[0-9]+:[0-9]+$")) and
+    all(.blockdevices[] | recurse(.children[]?);
+      (.path | type == "string" and startswith("/dev/")) and
+      (.kname | type == "string" and length > 0) and
+      (.mountpoints | type == "array") and
+      (.children == null or (.children | type == "array")))' <<<"$disk_info" >/dev/null ||
+    die 'Target is not one writable whole disk.'
+  if [[ "$target" == nixos-vm ]]; then
+    jq -e '.blockdevices[0].size >= 34359738368' <<<"$disk_info" >/dev/null ||
+      die 'VM disk must be at least 32 GiB (including space for its 8 GiB swapfile).'
+  fi
+  fingerprint=$(jq -c '.blockdevices[0] | {path,"maj:min",size,model,serial,wwn}' <<<"$disk_info")
+}
+
+check_mount_directory() {
+  local root=${1:-/mnt} mounts first_entry
+  [[ ! -L "$root" && ! -L "$root/boot" ]] || die 'Install mount paths must not be symlinks.'
+  mounts=$(findmnt --json --output TARGET) || die 'Cannot inspect mounted filesystems.'
+  jq -e --arg root "$root" '(.filesystems | type == "array" and length > 0) and
+    all(.filesystems[] | recurse(.children[]?);
+    (.target | type == "string" and startswith("/")) and
+    .target != $root and (.target | startswith($root + "/") | not))' <<<"$mounts" >/dev/null ||
+    die '/mnt is already in use. Inspect/unmount it manually; setup never cleans an old installation automatically.'
+  if [[ -e "$root" ]]; then
+    [[ -d "$root" ]] || die '/mnt must be a directory.'
+    # Inspect separately: a failed command must never look like empty output.
+    first_entry=$(find "$root" -mindepth 1 -maxdepth 1 -printf 'occupied' -quit) ||
+      die 'Cannot inspect install mount directory.'
+    [[ -z "$first_entry" ]] || die '/mnt must be an empty directory.'
+  fi
+}
+
+check_unused() {
+  local swaps node holders all_disks nodes device canonical
+  local -a identities=()
+  jq -e 'all(.blockdevices[] | recurse(.children[]?);
+    (.type == "disk" or .type == "part") and
+    all(.mountpoints[]?; . == null or . == ""))' <<<"$disk_info" >/dev/null ||
+    die 'Target or a child is mounted, swap, or a mapped/RAID device. Nothing will be automatically deactivated.'
+  # Reject holders even if lsblk did not report a mounted descendant.
+  nodes=$(jq -er '.blockdevices[] | recurse(.children[]?) | .kname' <<<"$disk_info") || die 'Cannot enumerate disk children.'
+  while IFS= read -r node; do
+    holders=(/sys/class/block/"${node##*/}"/holders/*)
+    [[ ! -e "${holders[0]}" ]] || die "Active block-device holder on $node."
+  done <<<"$nodes"
+  swaps=$(swapon --show --noheadings --raw --output NAME) || die 'Cannot inspect active swap.'
+  while IFS= read -r node; do
+    [[ -n "$node" ]] || continue
+    node=$(readlink -e -- "$node") || die 'Cannot resolve active swap.'
+    jq -e --arg node "$node" 'all(.blockdevices[] | recurse(.children[]?); .path != $node)' \
+      <<<"$disk_info" >/dev/null || die 'Target contains active swap.'
+  done <<<"$swaps"
+  check_mount_directory
+  # Disko formats by partition label. A matching label on ANOTHER disk could
+  # otherwise redirect formatting away from the disk named in the confirmation.
+  all_disks=$(lsblk --json --tree --paths --output PATH,PARTLABEL) || die 'Cannot inspect partition labels.'
+  jq -e --argjson plan "$plan" --argjson target_disk "$disk_info" '
+    (.blockdevices | type == "array" and length > 0) and (
+    [$target_disk.blockdevices[] | recurse(.children[]?) | .path] as $paths |
+    [$plan.disks[0].partitions[].label] as $labels |
+    all(.blockdevices[] | recurse(.children[]?);
+      . as $node | ($labels | index($node.partlabel)) == null or
+      ($paths | index($node.path)) != null))' <<<"$all_disks" >/dev/null ||
+    die 'A target partition label also exists on another disk; resolve the collision first.'
+  # Existing label aliases must not resolve to the same block device, or to a
+  # device outside the confirmed disk. Missing labels are normal before GPT creation.
+  nodes=$(jq -er '.filesystems[].device' <<<"$plan") || die 'Cannot enumerate filesystem targets.'
+  while IFS= read -r device; do
+    if [[ -e "$device" || -L "$device" ]]; then
+      canonical=$(readlink -e -- "$device") || die "Cannot resolve filesystem target: $device"
+      is_block_device "$canonical" || die "Not a block device: $device"
+      jq -e --arg dev "$canonical" 'any(.blockdevices[] | recurse(.children[]?); .path == $dev)' \
+        <<<"$disk_info" >/dev/null || die "Filesystem target is outside the confirmed disk: $device"
+      for node in "${identities[@]}"; do
+        [[ "$node" != "$canonical" ]] || die 'Filesystem targets resolve to the same device.'
+      done
+      identities+=("$canonical")
+    fi
+  done <<<"$nodes"
+}
+
+show_disk() {
+  printf '\n========== DESTRUCTIVE INSTALLATION PLAN ==========\n'
+  printf 'Host: %s\nFlake configuration: %s\nDISK TO ERASE: %s -> %s\n' "$friendly" "$target" "$disk" "$resolved"
+  jq -r '.blockdevices[0] | "Model: \(.model // "unavailable")\nSerial: \(.serial // "unavailable")\nWWN: \(.wwn // "unavailable")\nSize: \(.size) bytes"' <<<"$disk_info"
+  lsblk --paths --output NAME,TYPE,SIZE,FSTYPE,PARTLABEL,MOUNTPOINTS -- "$resolved"
+  printf 'ALL DATA on this disk will be lost during installation.\n===================================================\n'
+}
+
+confirm_erase() {
+  local confirmation
+  # main has required terminal stdin/stdout/stderr before reaching this point.
+  printf '\nType exactly ERASE %s to continue: ' "$disk"
+  IFS= read -r confirmation || die 'No confirmation received.'
+  [[ "$confirmation" == "ERASE $disk" ]] || die 'Confirmation did not match; nothing erased.'
+}
+
+verify_mounts() {
+  local mountpoint expected actual info
+  for mountpoint in / /boot; do
+    expected=$(jq -er --arg mp "$mountpoint" '.filesystems[$mp].device' <<<"$plan")
+    expected=$(readlink -e -- "$expected")
+    info=$(lsblk --json --tree --paths --output PATH -- "$resolved")
+    jq -e --arg dev "$expected" 'any(.blockdevices[] | recurse(.children[]?); .path == $dev)' \
+      <<<"$info" >/dev/null || die "Installed $mountpoint device is not on the confirmed disk."
+    actual=$(findmnt --noheadings --raw --mountpoint "/mnt${mountpoint%/}" --output SOURCE)
+    [[ "$(readlink -e -- "$actual")" == "$expected" ]] || die "Wrong mount at /mnt${mountpoint%/}."
+    actual=$(findmnt --noheadings --raw --mountpoint "/mnt${mountpoint%/}" --output FSTYPE)
+    [[ "$actual" == "$(jq -r --arg mp "$mountpoint" '.filesystems[$mp].fsType' <<<"$plan")" ]] ||
+      die "Wrong filesystem type at /mnt${mountpoint%/}."
+  done
+}
+
+lock_installation() {
+  exec 9>/run/nixos-repo-setup.lock
+  flock -n 9 || die 'Another setup installation is running.'
+}
+
+build_disko() {
+  script_output=$(nix_cmd build --no-link --print-out-paths --no-update-lock-file \
+    "$snapshot#nixosConfigurations.$target.config.system.build.destroyFormatMount" 9>&-)
+  [[ "$script_output" == /nix/store/* && "$script_output" != *$'\n'* &&
+    -x "$script_output/bin/disko-destroy-format-mount" ]] || die 'Unexpected Disko script output.'
+}
+
+run_disko() {
+  "$script_output/bin/disko-destroy-format-mount" --yes-wipe-all-disks 9>&-
+}
+
+set_password() {
+  # Direct terminal I/O to the INSTALLED passwd; no shell variable, pipe, log,
+  # password argument, Nix expression, or temporary password file is involved.
+  nixos-enter --root /mnt -c '/nix/var/nix/profiles/system/sw/bin/passwd corey' \
+    9>&- </dev/tty >/dev/tty 2>/dev/tty
+}
+
+verify_installation() {
+  verify_mounts
+  [[ -e /mnt/boot/EFI/systemd/systemd-bootx64.efi || -e /mnt/boot/EFI/systemd/systemd-bootaa64.efi ]] ||
+    die 'Installed systemd-boot EFI executable is missing.'
+  compgen -G '/mnt/boot/loader/entries/nixos*.conf' >/dev/null || die 'No NixOS systemd-boot entry was installed.'
+  nixos-enter --root /mnt -c '/nix/var/nix/profiles/system/sw/bin/id corey' 9>&-
+}
+
+main() {
+  local check=false repo snapshot plan disk resolved disk_info fingerprint friendly target
+  local phase=preflight command expected script_output
+  trap 'printf "setup: failed during %s (line %s). No automatic rollback/unmount; inspect before retrying.\n" "$phase" "$LINENO" >&2' ERR
+  trap 'printf "setup: interrupted; no automatic rollback/unmount.\n" >&2; exit 130' INT
+  trap 'printf "setup: terminated; no automatic rollback/unmount.\n" >&2; exit 143' TERM
+  if [[ "${1:-}" == --help || "${1:-}" == -h ]]; then usage; return; fi
+  if [[ "${1:-}" == --check ]]; then check=true; shift; fi
+  (( $# == 1 )) || { usage >&2; die 'Provide exactly one host.'; }
+  friendly=$1
+  select_host "$friendly"
+  if ! "$check"; then require_root; require_terminal; fi
+  for command in nix jq git lsblk findmnt swapon readlink uname find flock nixos-install nixos-enter; do
+    command -v "$command" >/dev/null || die "Missing required tool: $command (use a NixOS live installer)."
+  done
+  repo=$(readlink -e -- "${BASH_SOURCE[0]}")
+  repo=${repo%/*}
+  [[ -f "$repo/flake.nix" && -f "$repo/flake.lock" ]] || die 'Run the setup script from its repository checkout.'
+  evaluate_plan
+  validate_plan
+  require_vm
+  require_uefi
+  probe_disk
+  show_disk
+  check_unused
+  if "$check"; then
+    printf '\nCHECK PASSED. Nothing was erased, mounted, installed, or password-modified.\n'
+    return
+  fi
+
+  # Lock only installation, not --check. Close FD 9 in long-lived child commands.
+  lock_installation
+  phase='building the pinned Disko helper (not executing it)'
+  build_disko
+  expected=$fingerprint
+  probe_disk
+  [[ "$fingerprint" == "$expected" ]] || die 'Disk identity changed during preflight.'
+  check_unused
+  show_disk
+  confirm_erase
+  probe_disk
+  [[ "$fingerprint" == "$expected" ]] || die 'Disk identity changed after confirmation.'
+  check_unused
+
+  phase='partitioning/formatting/mounting'
+  # Pinned Disko module output; flag confirmed in its lib/default.nix. The exact
+  # disk confirmation above replaces Disko's weaker yes/no prompt.
+  run_disko
+  verify_mounts
+  phase='NixOS installation'
+  nixos-install --root /mnt --flake "$snapshot#$target" --no-root-password \
+    --no-channel-copy --no-update-lock-file --no-write-lock-file \
+    --option extra-experimental-features 'nix-command flakes' 9>&-
+  phase='verification before setting password'
+  verify_installation
+  phase='setting Corey password'
+  printf '\nSet Corey\047s local password now. setup never reads or stores it.\n'
+  set_password
+  phase='post-install verification'
+  verify_installation
+  printf '\nInstallation complete. Filesystems remain mounted under /mnt.\nReboot manually when ready; setup will not reboot.\n'
+}
+
+if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then main "$@"; fi
