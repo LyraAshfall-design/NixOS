@@ -4,13 +4,16 @@ set +x
 set -Eeuo pipefail
 umask 077
 
+readonly DESKTOP_DISK=/dev/disk/by-id/nvme-SIX_X7400_SSD_STX26012100037853
+
 usage() {
   cat <<'EOF'
 Usage: ./setup [--check] <host>
+       ./setup --test-disko desktop /dev/disk/by-id/<DISPOSABLE-DISK>
+       ./setup --verify-disko desktop /dev/disk/by-id/<DISPOSABLE-DISK>
        ./setup --help
 
-  vm       nixos-vm: disposable QEMU/KVM guest, /dev/vda, UEFI, at least 32 GiB
-  desktop  nixos-desktop: refused until a reviewed physical Disko layout exists
+  desktop  nixos-desktop: review-only Btrfs layout; --check only, never install
   laptop   not implemented
 
 Run installation as root from a NixOS live installer with an interactive terminal.
@@ -19,6 +22,9 @@ disk, but never builds/runs Disko, mounts, installs, or changes passwords. Nix m
 fetch pinned sources into its store. Missing/unsafe prerequisites are failures.
 Installation ERASES the selected disk after an exact typed confirmation.
 No automatic reboot or automatic recovery/unmount is performed.
+--test-disko ERASES only an explicitly supplied disposable disk (minimum 8 GiB),
+tests the desktop filesystem layout under /mnt, and NEVER installs NixOS.
+--verify-disko only inspects a completed test still mounted under /mnt.
 EOF
 }
 
@@ -27,7 +33,6 @@ die() { printf 'setup: %s\n' "$*" >&2; exit 1; }
 # Add future implemented hosts here; never interpolate arbitrary user input.
 select_host() {
   case "$1" in
-    vm) target=nixos-vm ;;
     desktop) target=nixos-desktop ;;
     laptop|server) die "Host '$1' is not implemented in this repository." ;;
     *) die "Unknown host '$1'. Use --help for supported names." ;;
@@ -39,33 +44,32 @@ require_root() { (( EUID == 0 )) || die 'Installation requires root: sudo ./setu
 require_terminal() {
   [[ -t 0 && -t 1 && -t 2 ]] || die 'Installation requires an interactive terminal, without redirection.'
 }
-require_uefi() { [[ -d /sys/firmware/efi ]] || die 'Boot the live installer in UEFI mode.'; }
-require_vm() {
-  local virtualization
-  [[ "$target" == nixos-vm ]] || return 0
-  command -v systemd-detect-virt >/dev/null || die 'Missing systemd-detect-virt; cannot verify the VM environment.'
-  virtualization=$(systemd-detect-virt) ||
-    die 'vm requires a disposable QEMU/KVM guest with no valuable disks or host block-device passthrough; virtualization detection failed.'
-  case "$virtualization" in
-    qemu|kvm) ;;
-    *) die "Unsupported virtualization '$virtualization': vm requires a disposable QEMU/KVM guest with no valuable disks or host block-device passthrough." ;;
-  esac
-  # Detection is only a guard against the wrong environment, not proof that
-  # /dev/vda is disposable. The operator must provide an isolated fresh guest.
-}
+is_uefi() { [[ -d /sys/firmware/efi ]]; }
+require_uefi() { is_uefi || die 'Boot the live installer in UEFI mode.'; }
 is_block_device() { [[ -b "$1" ]]; }
 
+require_install_enabled() {
+  die 'Desktop Disko configuration is defined and checkable, but destructive desktop installation is not yet enabled. Run ./setup --check desktop and complete final backup/layout review first.'
+}
+
 evaluate_plan() {
+  # Include deliberately unstaged layout files without updating inputs.
+  local flake_ref="path:$repo"
   # Freeze repository + locked inputs before confirmation. All later commands
   # use this store snapshot, never a working tree that can change mid-install.
-  snapshot=$(nix_cmd flake archive --json --no-update-lock-file --no-write-lock-file "$repo" |
+  snapshot=$(nix_cmd flake archive --json --no-update-lock-file --no-write-lock-file "$flake_ref" |
     jq -er '.path | select(startswith("/nix/store/"))')
+  snapshot="path:$snapshot"
   nix_cmd eval --json --no-update-lock-file "$snapshot#nixosConfigurations" \
     --apply builtins.attrNames | jq -e --arg host "$target" 'index($host) != null' >/dev/null ||
     die "Flake configuration '$target' does not exist."
+  read_plan --no-update-lock-file "$snapshot#nixosConfigurations.$target.config"
+}
+
+read_plan() {
   # Nix attribute interpolation below must reach Nix verbatim, not Bash.
   # shellcheck disable=SC2016
-  plan=$(nix_cmd eval --json --no-update-lock-file "$snapshot#nixosConfigurations.$target.config" --apply '
+  plan=$(nix_cmd eval --json "$@" --apply '
     c: let
       hasDisko = c ? disko && c.disko.enableConfig;
       disks = if hasDisko then builtins.attrValues c.disko.devices.disk else [];
@@ -81,6 +85,7 @@ evaluate_plan() {
       passwordUnmanaged = builtins.all (v: v == null) (map
         (key: c.users.users.corey.${key})
         [ "password" "hashedPassword" "hashedPasswordFile" "initialPassword" "initialHashedPassword" ]);
+      swapDevices = map (s: s.device) c.swapDevices;
       inherit hasDisko;
       root = if hasDisko then c.disko.rootMountPoint else null;
       otherDevices = if hasDisko then builtins.filter (key:
@@ -92,49 +97,70 @@ evaluate_plan() {
         type = d.content.type or null;
         partitions = map (p: {
           inherit (p) device label type;
+          size = p.size;
           filesystemDevice = p.content.device or null;
           contentType = p.content.type or null;
           format = p.content.format or null;
           mountpoint = p.content.mountpoint or null;
+          mountOptions = p.content.mountOptions or [];
+          swap = p.content.swap or {};
+          subvolumes = builtins.mapAttrs (_: s: {
+            inherit (s) name mountpoint mountOptions swap;
+          }) (p.content.subvolumes or {});
         }) (builtins.attrValues (d.content.partitions or {}));
       }) disks;
-      filesystems = builtins.mapAttrs (_: f: { inherit (f) device fsType; }) c.fileSystems;
+      filesystems = builtins.mapAttrs (_: f: { inherit (f) device fsType options; }) c.fileSystems;
     }')
 }
 
 validate_plan() {
   jq -e '.hasDisko' <<<"$plan" >/dev/null ||
     die "$target is not install-ready: no enabled Disko definition. Physical disks require a reviewed /dev/disk/by-id/... target."
-  jq -e '.root == "/mnt" and .uefi and .esp == "/boot" and
-    .mutableUser and .passwordUnmanaged and .otherDevices == [] and
-    (.disks | length) == 1 and .disks[0].destroy and .disks[0].type == "gpt" and
-    .disks[0].contentDevice == .disks[0].device and
-    (.disks[0].partitions | length) == 2 and
-    ([.disks[0].partitions[].label] | unique | length) == 2 and
-    ([.disks[0].partitions[].device] | unique | length) == 2 and
-    ([.filesystems[].device] | unique | length) == 2 and
-    ([.disks[0].partitions[].mountpoint] | sort) == ["/", "/boot"] and
-    (.filesystems | keys) == ["/", "/boot"] and
-    all(.disks[0].partitions[]; .contentType == "filesystem" and
-      .filesystemDevice == .device and
-      .device == ("/dev/disk/by-partlabel/" + .label) and
-      (.label | test("^[A-Za-z0-9_-]+$")) and
-      (if .mountpoint == "/boot" then .format == "vfat" and .type == "EF00"
-       else .format == "ext4" end)) and
-    (. as $p | all(.disks[0].partitions[];
-      $p.filesystems[.mountpoint].device == .device and
-      $p.filesystems[.mountpoint].fsType == .format))' <<<"$plan" >/dev/null ||
-    die 'Unsupported/ambiguous install plan. Review disk count, GPT root/ESP layout, mount paths, and mutable Corey password policy.'
+  validate_desktop_plan
   [[ "$(jq -r .platform <<<"$plan")" == "$(uname -m)-linux" ]] ||
     die 'Cross-architecture installation is not supported.'
   disk=$(jq -er '.disks[0].device' <<<"$plan")
-  if [[ "$target" == nixos-vm ]]; then
-    [[ "$disk" == /dev/vda ]] || die 'The reviewed VM target must remain /dev/vda.'
-  else
-    [[ "$disk" == /dev/disk/by-id/* ]] || die 'Physical targets must use /dev/disk/by-id/... .'
-  fi
+  [[ "$disk" == /dev/disk/by-id/* ]] || die 'Physical targets must use /dev/disk/by-id/... .'
   printf 'Host: %s (%s)\nFlake: %s#%s\nPlanned disk: %s\n' \
     "$friendly" "$(jq -r .hostname <<<"$plan")" "$snapshot" "$target" "$disk"
+}
+
+validate_desktop_plan() {
+  # Shared Btrfs devices are intentional only with three distinct subvolume selectors.
+  jq -e --arg disk "$DESKTOP_DISK" '
+    .hostname == "nixos-desktop" and .root == "/mnt" and .uefi and .esp == "/boot" and
+    .mutableUser and .passwordUnmanaged and .otherDevices == [] and .swapDevices == [] and
+    (.disks | length) == 1 and .disks[0].destroy and .disks[0].type == "gpt" and
+    .disks[0].device == $disk and .disks[0].contentDevice == $disk and
+    (.disks[0].partitions | length) == 2 and
+    ([.disks[0].partitions[].label] | unique | length) == 2 and
+    ([.disks[0].partitions[].device] | unique | length) == 2 and
+    all(.disks[0].partitions[];
+      .filesystemDevice == .device and .device == ("/dev/disk/by-partlabel/" + .label) and
+      (.label | test("^[A-Za-z0-9_-]+$"))) and
+    (.filesystems | keys) == ["/", "/boot", "/home", "/nix"] and
+    ([.disks[0].partitions[] | select(.contentType == "filesystem")] | length) == 1 and
+    ([.disks[0].partitions[] | select(.contentType == "btrfs")] | length) == 1 and
+    (. as $p |
+      (.disks[0].partitions[] | select(.contentType == "filesystem")) as $esp |
+      (.disks[0].partitions[] | select(.contentType == "btrfs")) as $b |
+      $esp.size == "1G" and $esp.type == "EF00" and $esp.format == "vfat" and
+      $esp.mountpoint == "/boot" and $esp.mountOptions == ["umask=0077"] and
+      $p.filesystems["/boot"].device == $esp.device and
+      $p.filesystems["/boot"].fsType == "vfat" and
+      $p.filesystems["/boot"].options == ["umask=0077"] and
+      $b.size == "100%" and $b.type == "8300" and $b.mountpoint == null and $b.swap == {} and
+      ($b.subvolumes | keys) == ["@home", "@nix", "@root"] and
+      all({"@root":"/", "@home":"/home", "@nix":"/nix"} | to_entries[];
+        . as $s | $b.subvolumes[$s.key] as $v |
+        $v.name == $s.key and $v.mountpoint == $s.value and $v.swap == {} and
+        ($v.mountOptions | sort) == ["compress=zstd", "noatime"] and
+        $p.filesystems[$s.value].device == $b.device and
+        $p.filesystems[$s.value].fsType == "btrfs" and
+        # NixOS adds this boot-order option to filesystems needed in initrd.
+        ($p.filesystems[$s.value].options | map(select(. != "x-initrd.mount")) | sort) ==
+          (["compress=zstd", "noatime", "subvol=" + $s.key] | sort)))
+  ' <<<"$plan" >/dev/null || die 'Desktop Disko target/layout is inconsistent with the reviewed SSD, ESP and @root/@home/@nix plan.'
 }
 
 probe_disk() {
@@ -152,9 +178,18 @@ probe_disk() {
       (.mountpoints | type == "array") and
       (.children == null or (.children | type == "array")))' <<<"$disk_info" >/dev/null ||
     die 'Target is not one writable whole disk.'
-  if [[ "$target" == nixos-vm ]]; then
-    jq -e '.blockdevices[0].size >= 34359738368' <<<"$disk_info" >/dev/null ||
-      die 'VM disk must be at least 32 GiB (including space for its 8 GiB swapfile).'
+  if [[ "$target" == nixos-desktop ]]; then
+    [[ "$disk" == "$DESKTOP_DISK" && "$resolved" == /dev/nvme0n1 ]] || die 'Unexpected desktop stable disk or resolved device.'
+    jq -e '.blockdevices[0] |
+      .model == "SIX X7400 SSD" and .serial == "STX26012100037853" and
+      (.size >= (1024209543168 - 1073741824) and .size <= (1024209543168 + 1073741824))' \
+      <<<"$disk_info" >/dev/null || die 'Desktop model, serial or capacity differs from the reviewed SSD (953.9 GiB, tolerance 1 GiB).'
+    local inventory
+    inventory=$(lsblk --json --nodeps --bytes --paths --output PATH,TYPE,MODEL,SERIAL,SIZE) || die 'Cannot inspect physical disk identities.'
+    jq -e --arg resolved "$resolved" '
+      [.blockdevices[] | select(.serial == "STX26012100037853")] |
+      length == 1 and .[0].path == $resolved and .[0].type == "disk"' \
+      <<<"$inventory" >/dev/null || die 'Desktop SSD identity is ambiguous.'
   fi
   fingerprint=$(jq -c '.blockdevices[0] | {path,"maj:min",size,model,serial,wwn}' <<<"$disk_info")
 }
@@ -227,6 +262,9 @@ check_unused() {
 }
 
 show_disk() {
+  if [[ "$target" == nixos-desktop ]]; then
+    printf '\nREAD-ONLY DESKTOP REVIEW: installation is disabled.\n'
+  fi
   printf '\n========== DESTRUCTIVE INSTALLATION PLAN ==========\n'
   printf 'Host: %s\nFlake configuration: %s\nDISK TO ERASE: %s -> %s\n' "$friendly" "$target" "$disk" "$resolved"
   jq -r '.blockdevices[0] | "Model: \(.model // "unavailable")\nSerial: \(.serial // "unavailable")\nWWN: \(.wwn // "unavailable")\nSize: \(.size) bytes"' <<<"$disk_info"
@@ -296,10 +334,24 @@ main() {
   trap 'printf "setup: interrupted; no automatic rollback/unmount.\n" >&2; exit 130' INT
   trap 'printf "setup: terminated; no automatic rollback/unmount.\n" >&2; exit 143' TERM
   if [[ "${1:-}" == --help || "${1:-}" == -h ]]; then usage; return; fi
+  if [[ "${1:-}" == --test-disko || "${1:-}" == --verify-disko ]]; then
+    (( $# == 3 )) && [[ "$2" == desktop ]] || die 'Use --test-disko or --verify-disko desktop /dev/disk/by-id/<DISPOSABLE-DISK>.'
+    repo=$(readlink -e -- "${BASH_SOURCE[0]}")
+    repo=${repo%/*}
+    # Only this explicit entry point loads the disposable-device override.
+    # Lint this helper separately (or with shellcheck -x); normal shellcheck does
+    # not follow external files without an explicit command-line option.
+    # shellcheck source=tests/disposable-disko.sh disable=SC1091
+    source "$repo/tests/disposable-disko.sh"
+    disposable_main "$1" "$3" "$repo"
+    return
+  fi
   if [[ "${1:-}" == --check ]]; then check=true; shift; fi
   (( $# == 1 )) || { usage >&2; die 'Provide exactly one host.'; }
   friendly=$1
   select_host "$friendly"
+  # This gate is independent of Disko availability, root, identity, or confirmations.
+  if ! "$check"; then require_install_enabled; fi
   if ! "$check"; then require_root; require_terminal; fi
   for command in nix jq git lsblk findmnt swapon readlink uname find flock nixos-install nixos-enter; do
     command -v "$command" >/dev/null || die "Missing required tool: $command (use a NixOS live installer)."
@@ -309,10 +361,20 @@ main() {
   [[ -f "$repo/flake.nix" && -f "$repo/flake.lock" ]] || die 'Run the setup script from its repository checkout.'
   evaluate_plan
   validate_plan
-  require_vm
   require_uefi
   probe_disk
   show_disk
+  if [[ "$target" == nixos-desktop ]]; then
+    # Mounted production storage is allowed ONLY in this review-only branch.
+    # Return before unused-disk checks, locking, builds, confirmations or operations.
+    "$check" || die 'Desktop installation is disabled.'
+    printf '\nCurrent mounts (read-only inspection):\n'
+    findmnt --real --output SOURCE,TARGET,FSTYPE,OPTIONS
+    printf '\nUEFI: yes; Disko evaluates: yes. Planned fresh-install mounts:\n'
+    jq '.filesystems' <<<"$plan"
+    printf '\nDESKTOP REVIEW CHECK PASSED. Production disk may be mounted. Destructive installation remains disabled; this is not erase authorization.\n'
+    return
+  fi
   check_unused
   if "$check"; then
     printf '\nCHECK PASSED. Nothing was erased, mounted, installed, or password-modified.\n'

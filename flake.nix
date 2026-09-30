@@ -39,19 +39,6 @@
     }:
     {
       nixosConfigurations = {
-        # Minimal QEMU/libvirt lab guest.
-        nixos-vm = nixpkgs.lib.nixosSystem {
-          system = "x86_64-linux";
-
-          modules = [
-            ./modules/core/base.nix
-            ./hosts/vm/default.nix
-
-            disko.nixosModules.disko
-            home-manager.nixosModules.home-manager
-          ];
-        };
-
         # Physical desktop.
         nixos-desktop = nixpkgs.lib.nixosSystem {
           system = "x86_64-linux";
@@ -60,6 +47,7 @@
             ./configuration.nix
             ./hosts/desktop/default.nix
 
+            disko.nixosModules.disko
             home-manager.nixosModules.home-manager
             noctalia.nixosModules.default
             silent-sddm.nixosModules.default

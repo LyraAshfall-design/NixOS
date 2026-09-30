@@ -1,9 +1,10 @@
-{ config, ... }:
+{ config, lib, ... }:
 
 {
   # System modules specific to the physical desktop.
   imports = [
     ./hardware-configuration.nix
+    ./disko.nix
     ../../modules/desktop/nvidia.nix
     ../../modules/virtualization.nix
     ../../modules/desktop/phone.nix
@@ -12,6 +13,13 @@
   ];
 
   networking.hostName = "nixos-desktop";
+
+  # RAM-backed swap only; no persistent swap or hibernation requirement.
+  zramSwap = {
+    enable = true;
+    memoryPercent = 50;
+  };
+  swapDevices = lib.mkForce [ ];
 
   users.users.corey.openssh.authorizedKeys.keys = [
     "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIJgINYP9Vr8VHhbB4Wk7wEk8x5i/6rLi5e2uAULFhrZT coreys-s23"

@@ -48,7 +48,6 @@
 
     # Rebuild whichever host this configuration is currently running on.
     # Example:
-    #   nixos-vm      -> .#nixos-vm
     #   nixos-desktop -> .#nixos-desktop
     functions = {
       rebuild = ''
@@ -108,7 +107,7 @@
   wayland.windowManager.hyprland = {
     enable = true;
     package = null;
-    # NixOS owns portal backends and routing, including XFCE in the lab VM.
+    # NixOS owns portal backends and routing.
     portalPackage = null;
 
     # The imported configuration is written using Hyprland's Lua support.

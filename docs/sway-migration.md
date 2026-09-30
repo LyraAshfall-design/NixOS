@@ -6,9 +6,7 @@ service restart, compositor reload, logout, suspend, or reboot was performed.
 ## Structure
 
 `flake.nix` composes the desktop from `configuration.nix`, its host module,
-Home Manager, Noctalia, and the official SilentSDDM module. The VM imports
-`modules/core/base.nix` and `hosts/vm/default.nix` directly, using XFCE and Corey's
-shared Home Manager configuration, without the Noctalia system module. Shared
+Home Manager, Noctalia, and the official SilentSDDM module. Shared
 system desktop services live in
 `modules/desktop/default.nix`; Sway system integration is in `modules/desktop/sway.nix`.
 `home/corey.nix` now imports `modules/home/default.nix`, which aggregates the
@@ -54,9 +52,8 @@ comments and this audit). No Sway command still invokes either shell/compositor.
 
 Sway receives GTK default portals and WLR ScreenCast/Screenshot from the pinned
 NixOS module. The NixOS Hyprland module installs its own portal. Home Manager's
-Hyprland `portalPackage` is null: NixOS alone owns portal packages and routing,
-including XFCE's packaged routing in the lab VM. This avoids a Hyprland-only
-user portal search path and the VM's empty Home Manager routing warning.
+Hyprland `portalPackage` is null: NixOS alone owns portal packages and routing.
+This avoids a Hyprland-only user portal search path.
 
 `modules/home/theme.nix` owns a shared static warm cat-cafe palette for GTK3/4,
 Kitty, qt6ct and KDE colors, plus Papirus-Dark icons with muted brown folders and

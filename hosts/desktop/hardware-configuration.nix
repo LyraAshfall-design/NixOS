@@ -13,28 +13,8 @@
   boot.kernelModules = [ "kvm-amd" ];
   boot.extraModulePackages = [ ];
 
-  fileSystems."/" =
-    { device = "/dev/disk/by-uuid/f08a2a5d-5672-4b7a-8040-473a6e2faf82";
-      fsType = "btrfs";
-    };
-
-  fileSystems."/home" =
-    { device = "/dev/disk/by-uuid/f08a2a5d-5672-4b7a-8040-473a6e2faf82";
-      fsType = "btrfs";
-      options = [ "subvol=home" ];
-    };
-
-  fileSystems."/nix" =
-    { device = "/dev/disk/by-uuid/f08a2a5d-5672-4b7a-8040-473a6e2faf82";
-      fsType = "btrfs";
-      options = [ "subvol=nix" ];
-    };
-
-  fileSystems."/boot" =
-    { device = "/dev/disk/by-uuid/15E7-D39B";
-      fsType = "vfat";
-      options = [ "fmask=0077" "dmask=0077" ];
-    };
+  # Filesystems are declared by ./disko.nix for the reviewed fresh-install layout.
+  # This is not an in-place migration of the existing UUID/subvolume mounts.
 
   swapDevices = [ ];
 
