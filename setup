@@ -47,6 +47,7 @@ require_terminal() {
 is_uefi() { [[ -d /sys/firmware/efi ]]; }
 require_uefi() { is_uefi || die 'Boot the live installer in UEFI mode.'; }
 is_block_device() { [[ -b "$1" ]]; }
+partition_identity_exists() { [[ -e "$1" || -L "$1" ]]; }
 
 require_install_enabled() {
   die 'Desktop Disko configuration is defined and checkable, but destructive desktop installation is not yet enabled. Run ./setup --check desktop and complete final backup/layout review first.'
@@ -212,9 +213,49 @@ check_mount_directory() {
   fi
 }
 
+check_live_root_separation() {
+  local root_source root_resolved ancestors live_disk live_tree
+  # Explicit plain partition-backed live-root check. Refuse an
+  # unresolvable root (e.g. overlay/live ISO) instead of guessing it is safe.
+  # findmnt reports the actual partition source; /dev/block/<major>:<minor>
+  # is not a portable pathname and was the cause of the previous false refusal.
+  root_source=$(findmnt --noheadings --raw --nofsroot --mountpoint / --output SOURCE) || die 'Cannot identify live root.'
+  [[ "$root_source" == /dev/* ]] || die 'Live root is not a plain block-device source; disposable test refused.'
+  root_resolved=$(readlink -e -- "$root_source") || die 'Cannot resolve live root source.'
+  is_block_device "$root_resolved" || die 'Live root source is not an identifiable block device; disposable test refused.'
+  ancestors=$(lsblk --json --inverse --paths --output PATH,TYPE -- "$root_resolved") || die 'Cannot inspect live-root ancestry.'
+  jq -e --arg root "$root_resolved" '
+    (.blockdevices | type == "array" and length == 1) and
+    .blockdevices[0].path == $root and .blockdevices[0].type == "part"
+  ' <<<"$ancestors" >/dev/null || die 'Invalid live-root ancestry inventory.'
+  live_disk=$(jq -er '[.blockdevices[] | recurse(.children[]?) | select(.type == "disk") | .path] |
+    unique | if length == 1 then .[0] else error("ambiguous live-root disk") end' <<<"$ancestors") ||
+    die 'Live-root disk ancestry is missing or ambiguous.'
+  live_tree=$(lsblk --json --tree --paths --output PATH,TYPE -- "$live_disk") || die 'Cannot inspect live-root disk tree.'
+  jq -e --arg disk "$live_disk" --arg root "$root_resolved" '
+    (.blockdevices | type == "array" and length == 1) and
+    .blockdevices[0].path == $disk and .blockdevices[0].type == "disk" and
+    all(.blockdevices[] | recurse(.children[]?);
+      (.path | type == "string" and startswith("/dev/")) and
+      (.type == "disk" or .type == "part") and
+      (.children == null or (.children | type == "array"))) and
+    any(.blockdevices[0].children[]?; .path == $root and .type == "part")
+  ' <<<"$live_tree" >/dev/null || die 'Invalid or incomplete live-root disk tree.'
+  jq -e --arg dev "$resolved" 'any(.blockdevices[] | recurse(.children[]?); .path == $dev) | not' <<<"$live_tree" >/dev/null ||
+    die 'Selected target is the live-root disk or one of its partitions.'
+}
+
+check_holders() {
+  local directory=$1 entries
+  [[ -d "$directory" && -r "$directory" && -x "$directory" ]] || die "Cannot inspect holder directory: $directory"
+  entries=$(find "$directory" -mindepth 1 -maxdepth 1 -printf occupied -quit) || die "Cannot inspect holders: $directory"
+  [[ -z "$entries" ]] || die "Active block-device holder: $directory"
+}
+
 check_unused() {
-  local swaps node holders all_disks nodes device canonical
+  local swaps node all_disks nodes device canonical label candidates candidate chosen
   local -a identities=()
+  check_live_root_separation
   jq -e 'all(.blockdevices[] | recurse(.children[]?);
     (.type == "disk" or .type == "part") and
     all(.mountpoints[]?; . == null or . == ""))' <<<"$disk_info" >/dev/null ||
@@ -222,8 +263,7 @@ check_unused() {
   # Reject holders even if lsblk did not report a mounted descendant.
   nodes=$(jq -er '.blockdevices[] | recurse(.children[]?) | .kname' <<<"$disk_info") || die 'Cannot enumerate disk children.'
   while IFS= read -r node; do
-    holders=(/sys/class/block/"${node##*/}"/holders/*)
-    [[ ! -e "${holders[0]}" ]] || die "Active block-device holder on $node."
+    check_holders "/sys/class/block/${node##*/}/holders"
   done <<<"$nodes"
   swaps=$(swapon --show --noheadings --raw --output NAME) || die 'Cannot inspect active swap.'
   while IFS= read -r node; do
@@ -244,11 +284,27 @@ check_unused() {
       . as $node | ($labels | index($node.partlabel)) == null or
       ($paths | index($node.path)) != null))' <<<"$all_disks" >/dev/null ||
     die 'A target partition label also exists on another disk; resolve the collision first.'
-  # Existing label aliases must not resolve to the same block device, or to a
+  # A label must not identify two distinct partitions even on this same disk.
+  nodes=$(jq -er '.disks[0].partitions[].label' <<<"$plan") || die 'Cannot enumerate planned labels.'
+  while IFS= read -r label; do
+    candidates=$(jq -r --arg label "$label" '
+      .blockdevices[] | recurse(.children[]?) | select(.partlabel == $label) | .path
+    ' <<<"$all_disks") || die 'Cannot inspect planned label identities.'
+    chosen=''
+    while IFS= read -r candidate; do
+      [[ -n "$candidate" ]] || continue
+      canonical=$(readlink -e -- "$candidate") || die 'Cannot resolve planned label identity.'
+      is_block_device "$canonical" || die 'Planned label is not a block device.'
+      [[ -z "$chosen" || "$chosen" == "$canonical" ]] || die 'Ambiguous planned partition label.'
+      chosen=$canonical
+    done <<<"$candidates"
+  done <<<"$nodes"
+  # Inspect each planned partition once, not each Btrfs subvolume mount.
+  # Distinct planned partitions must not resolve to the same block device, or to a
   # device outside the confirmed disk. Missing labels are normal before GPT creation.
-  nodes=$(jq -er '.filesystems[].device' <<<"$plan") || die 'Cannot enumerate filesystem targets.'
+  nodes=$(jq -er '.disks[0].partitions[].device' <<<"$plan") || die 'Cannot enumerate filesystem targets.'
   while IFS= read -r device; do
-    if [[ -e "$device" || -L "$device" ]]; then
+    if partition_identity_exists "$device"; then
       canonical=$(readlink -e -- "$device") || die "Cannot resolve filesystem target: $device"
       is_block_device "$canonical" || die "Not a block device: $device"
       jq -e --arg dev "$canonical" 'any(.blockdevices[] | recurse(.children[]?); .path == $dev)' \
@@ -280,20 +336,73 @@ confirm_erase() {
   [[ "$confirmation" == "ERASE $disk" ]] || die 'Confirmation did not match; nothing erased.'
 }
 
-verify_mounts() {
-  local mountpoint expected actual info
-  for mountpoint in / /boot; do
-    expected=$(jq -er --arg mp "$mountpoint" '.filesystems[$mp].device' <<<"$plan")
-    expected=$(readlink -e -- "$expected")
-    info=$(lsblk --json --tree --paths --output PATH -- "$resolved")
-    jq -e --arg dev "$expected" 'any(.blockdevices[] | recurse(.children[]?); .path == $dev)' \
-      <<<"$info" >/dev/null || die "Installed $mountpoint device is not on the confirmed disk."
-    actual=$(findmnt --noheadings --raw --mountpoint "/mnt${mountpoint%/}" --output SOURCE)
-    [[ "$(readlink -e -- "$actual")" == "$expected" ]] || die "Wrong mount at /mnt${mountpoint%/}."
-    actual=$(findmnt --noheadings --raw --mountpoint "/mnt${mountpoint%/}" --output FSTYPE)
-    [[ "$actual" == "$(jq -r --arg mp "$mountpoint" '.filesystems[$mp].fsType' <<<"$plan")" ]] ||
-      die "Wrong filesystem type at /mnt${mountpoint%/}."
+verified_partition() {
+  local label=$1 node=$2 inventory=$3 candidates candidate canonical parent metadata identity chosen='' chosen_id=''
+  candidates=$(jq -er --arg label "$label" '
+    [.blockdevices[] | recurse(.children[]?) | select(.partlabel == $label) | .path] |
+    if length > 0 and all(.[]; type == "string" and startswith("/dev/"))
+    then .[] else error("missing partition identity") end' <<<"$inventory") || die "Missing partition identity: $label"
+  # Include the expected label alias and GPT node; all identities must agree.
+  candidates+=$'\n'"/dev/disk/by-partlabel/$label"$'\n'"$node"
+  while IFS= read -r candidate; do
+    canonical=$(readlink -e -- "$candidate") || die "Cannot resolve partition identity: $candidate"
+    is_block_device "$canonical" || die "Partition identity is not a block device: $candidate"
+    metadata=$(lsblk --json --nodeps --paths --output PATH,TYPE,PKNAME,PARTLABEL,MAJ:MIN -- "$canonical") || die 'Cannot inspect partition identity.'
+    jq -e --arg dev "$canonical" --arg label "$label" '
+      (.blockdevices | length) == 1 and (.blockdevices[0] |
+      .path == $dev and .type == "part" and .partlabel == $label and
+      (.pkname | type == "string" and startswith("/dev/")) and
+      (.["maj:min"] | type == "string" and test("^[0-9]+:[0-9]+$")))' <<<"$metadata" >/dev/null || die 'Invalid partition identity metadata.'
+    parent=$(readlink -e -- "$(jq -er '.blockdevices[0].pkname' <<<"$metadata")") || die 'Cannot resolve partition parent.'
+    [[ "$parent" == "$resolved" ]] || die 'Partition belongs to another disk.'
+    identity=$(jq -er '.blockdevices[0]["maj:min"]' <<<"$metadata") || die 'Missing partition device number.'
+    if [[ -n "$chosen" ]]; then
+      [[ "$canonical" == "$chosen" && "$identity" == "$chosen_id" ]] || die 'Ambiguous partition identities.'
+    else
+      chosen=$canonical chosen_id=$identity
+    fi
+  done <<<"$candidates"
+  printf '%s %s\n' "$chosen" "$chosen_id"
+}
+
+verify_mount_mapping() {
+  local esp_id=$1 root=$2 mp info expected source source_device
+  for mp in / /home /nix /boot; do
+    info=$(findmnt --json --nofsroot --mountpoint "/mnt${mp%/}" --output SOURCE,MAJ:MIN,FSTYPE,FSROOT,OPTIONS) || die "Missing target mount: $mp"
+    if [[ "$mp" == /boot ]]; then
+      jq -e --arg id "$esp_id" '(.filesystems | length) == 1 and (.filesystems[0] |
+        .["maj:min"] == $id and .fstype == "vfat" and .fsroot == "/" and
+        (.options | split(",") | (index("umask=0077") != null or
+          (index("fmask=0077") != null and index("dmask=0077") != null))))' <<<"$info" >/dev/null || die 'Incorrect target ESP mount/permissions.'
+    else
+      case "$mp" in /) expected=/@root ;; /home) expected=/@home ;; /nix) expected=/@nix ;; esac
+      # Btrfs mount MAJ:MIN is an anonymous filesystem device (e.g. 0:97),
+      # not the backing partition's device number. --nofsroot exposes only
+      # the source device; FSROOT independently verifies the subvolume below.
+      source=$(jq -er 'if (.filesystems | length) == 1 then
+        .filesystems[0].source | select(type == "string" and startswith("/dev/"))
+        else error("ambiguous mount source") end' <<<"$info") || die "Missing Btrfs backing device: $mp"
+      source_device=$(readlink -e -- "$source") || die "Cannot resolve Btrfs backing device: $mp"
+      is_block_device "$source_device" && [[ "$source_device" == "$root" ]] || die "Incorrect Btrfs backing device: $mp"
+      jq -e --arg subvol "$expected" '(.filesystems | length) == 1 and (.filesystems[0] |
+        .fstype == "btrfs" and .fsroot == $subvol and
+        (.options | split(",") | index("noatime") != null and any(.[]; test("^compress=zstd(:[0-9]+)?$"))))' \
+        <<<"$info" >/dev/null || die "Incorrect target Btrfs mount: $mp"
+    fi
   done
+}
+
+verify_mounts() {
+  local inventory esp root esp_id root_id verified node
+  inventory=$(lsblk --json --list --paths --output PATH,PARTLABEL) || die 'Cannot enumerate partition identities.'
+  node=$(jq -er '.filesystems["/boot"].device' <<<"$plan") || die 'Missing planned ESP.'
+  verified=$(verified_partition disk-main-ESP "$node" "$inventory") || die 'ESP identity verification failed.'
+  read -r esp esp_id <<<"$verified"
+  node=$(jq -er '.filesystems["/"].device' <<<"$plan") || die 'Missing planned root.'
+  verified=$(verified_partition disk-main-root "$node" "$inventory") || die 'Root identity verification failed.'
+  read -r root root_id <<<"$verified"
+  [[ "$esp" != "$root" && "$esp_id" != "$root_id" ]] || die 'Ambiguous partition identities.'
+  verify_mount_mapping "$esp_id" "$root"
 }
 
 lock_installation() {
@@ -325,6 +434,47 @@ verify_installation() {
     die 'Installed systemd-boot EFI executable is missing.'
   compgen -G '/mnt/boot/loader/entries/nixos*.conf' >/dev/null || die 'No NixOS systemd-boot entry was installed.'
   nixos-enter --root /mnt -c '/nix/var/nix/profiles/system/sw/bin/id corey' 9>&-
+}
+
+# Shared installation sequence; main retains both desktop refusal gates.
+install_target() {
+  check_unused
+  if "$check"; then
+    printf '\nCHECK PASSED. Nothing was erased, mounted, installed, or password-modified.\n'
+    return
+  fi
+
+  # Lock only installation, not --check. Close FD 9 in long-lived child commands.
+  lock_installation
+  phase='building the pinned Disko helper (not executing it)'
+  build_disko
+  expected=$fingerprint
+  probe_disk
+  [[ "$fingerprint" == "$expected" ]] || die 'Disk identity changed during preflight.'
+  check_unused
+  show_disk
+  confirm_erase
+  probe_disk
+  [[ "$fingerprint" == "$expected" ]] || die 'Disk identity changed after confirmation.'
+  check_unused
+
+  phase='partitioning/formatting/mounting'
+  # Pinned Disko module output; flag confirmed in its lib/default.nix. The exact
+  # disk confirmation above replaces Disko's weaker yes/no prompt.
+  run_disko
+  verify_mounts
+  phase='NixOS installation'
+  nixos-install --root /mnt --flake "$snapshot#$target" --no-root-password \
+    --no-channel-copy --no-update-lock-file --no-write-lock-file \
+    --option extra-experimental-features 'nix-command flakes' 9>&-
+  phase='verification before setting password'
+  verify_installation
+  phase='setting Corey password'
+  printf '\nSet Corey\047s local password now. setup never reads or stores it.\n'
+  set_password
+  phase='post-install verification'
+  verify_installation
+  printf '\nInstallation complete. Filesystems remain mounted under /mnt.\nReboot manually when ready; setup will not reboot.\n'
 }
 
 main() {
@@ -375,43 +525,7 @@ main() {
     printf '\nDESKTOP REVIEW CHECK PASSED. Production disk may be mounted. Destructive installation remains disabled; this is not erase authorization.\n'
     return
   fi
-  check_unused
-  if "$check"; then
-    printf '\nCHECK PASSED. Nothing was erased, mounted, installed, or password-modified.\n'
-    return
-  fi
-
-  # Lock only installation, not --check. Close FD 9 in long-lived child commands.
-  lock_installation
-  phase='building the pinned Disko helper (not executing it)'
-  build_disko
-  expected=$fingerprint
-  probe_disk
-  [[ "$fingerprint" == "$expected" ]] || die 'Disk identity changed during preflight.'
-  check_unused
-  show_disk
-  confirm_erase
-  probe_disk
-  [[ "$fingerprint" == "$expected" ]] || die 'Disk identity changed after confirmation.'
-  check_unused
-
-  phase='partitioning/formatting/mounting'
-  # Pinned Disko module output; flag confirmed in its lib/default.nix. The exact
-  # disk confirmation above replaces Disko's weaker yes/no prompt.
-  run_disko
-  verify_mounts
-  phase='NixOS installation'
-  nixos-install --root /mnt --flake "$snapshot#$target" --no-root-password \
-    --no-channel-copy --no-update-lock-file --no-write-lock-file \
-    --option extra-experimental-features 'nix-command flakes' 9>&-
-  phase='verification before setting password'
-  verify_installation
-  phase='setting Corey password'
-  printf '\nSet Corey\047s local password now. setup never reads or stores it.\n'
-  set_password
-  phase='post-install verification'
-  verify_installation
-  printf '\nInstallation complete. Filesystems remain mounted under /mnt.\nReboot manually when ready; setup will not reboot.\n'
+  install_target
 }
 
 if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then main "$@"; fi

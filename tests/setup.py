@@ -79,19 +79,29 @@ snapshot=/nix/store/fixture-source
 disk=/dev/vda
 resolved=/dev/vda
 disk_info=$DISK
+is_block_device() { :; }
+eval "$(declare -f check_holders | sed '1s/check_holders/real_check_holders/')"
+check_holders() { real_check_holders "$HOLDER_DIR"; }
 uname() { printf 'x86_64\n'; }
 readlink() {
-  if [[ "${*: -1}" == /dev/vda* ]]; then printf '%s\n' "${*: -1}";
+  if [[ "${*: -1}" == /dev/vda* || "${*: -1}" == /dev/sdy* ]]; then printf '%s\n' "${*: -1}";
   elif [[ "${*: -1}" == /dev/disk/by-partlabel/disk-main-ESP ]]; then echo /dev/vda1;
   elif [[ "${*: -1}" == /dev/disk/by-partlabel/disk-main-root ]]; then echo /dev/vda2;
   else command readlink "$@"; fi
 }
 lsblk() {
-  if [[ "$*" == *PATH,PARTLABEL* ]]; then printf '%s\n' "$ALL_DISKS";
+  if [[ "$*" == *--inverse* ]]; then
+    echo '{"blockdevices":[{"path":"/dev/sdy2","type":"part","children":[{"path":"/dev/sdy","type":"disk"}]}]}'
+  elif [[ "$*" == *--tree* && "${*: -1}" == /dev/sdy ]]; then
+    echo '{"blockdevices":[{"path":"/dev/sdy","type":"disk","children":[{"path":"/dev/sdy2","type":"part"}]}]}'
+  elif [[ "$*" == *PATH,PARTLABEL* ]]; then printf '%s\n' "$ALL_DISKS";
   else printf '%s\n' "$DISK"; fi
 }
 swapon() { printf '%s' "$SWAPS"; }
-findmnt() { printf '%s\n' "$MOUNTS"; }
+findmnt() {
+  if [[ "$*" == *'--mountpoint / --output SOURCE'* ]]; then echo /dev/sdy2;
+  else printf '%s\n' "$MOUNTS"; fi
+}
 '''
 
 
@@ -102,8 +112,10 @@ class SetupTests(unittest.TestCase):
                    ALL_DISKS=json.dumps(DISK if all_disks is None else all_disks),
                    MOUNTS=json.dumps({"filesystems": [{"target": "/"}]} if mounts is None else mounts), SWAPS=swaps)
         env.update(extra_env or {})
-        return subprocess.run(['bash', '-c', PRELUDE + '\n' + body], env=env,
-                              capture_output=True, text=True, timeout=10, input=answer)
+        with tempfile.TemporaryDirectory() as holders:
+            env['HOLDER_DIR'] = holders
+            return subprocess.run(['bash', '-c', PRELUDE + '\n' + body], env=env,
+                                  capture_output=True, text=True, timeout=10, input=answer)
 
     def test_whitelist_and_help(self):
         for name in ('desktop',):
@@ -278,34 +290,29 @@ set_password() { die 'UNEXPECTED password'; }
         self.assertNotEqual(result.returncode, 0)
         self.assertIn('another disk', result.stderr)
 
+    def test_duplicate_label_on_two_target_partitions_is_refused(self):
+        inventory = copy.deepcopy(DISK)
+        for part in inventory['blockdevices'][0]['children']:
+            part['partlabel'] = 'disk-main-root'
+        result = self.run_gate('check_mount_directory() { :; }; check_unused', all_disks=inventory)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('Ambiguous planned partition label', result.stderr)
+
     def test_only_exact_disk_confirmation_is_accepted(self):
         for answer in ('yes\n', 'y\n', 'ERASE /dev/sda\n', 'ERASE /dev/vda \n', '', '\n'):
             self.assertNotEqual(self.run_gate('confirm_erase', answer=answer).returncode, 0)
         self.assertEqual(self.run_gate('confirm_erase', answer='ERASE /dev/vda\n').returncode, 0)
 
-    def test_mount_verification_checks_both_partitions_and_filesystem_types(self):
-        disk = copy.deepcopy(DISK)
-        disk['blockdevices'][0]['children'] = [{'path': '/dev/vda1'}, {'path': '/dev/vda2'}]
-        body = r'''
-readlink() {
-  case "${*: -1}" in
-    */disk-main-root) printf '/dev/vda2\n' ;;
-    */disk-main-ESP) printf '/dev/vda1\n' ;;
-    *) printf '%s\n' "${*: -1}" ;;
-  esac
-}
-findmnt() {
-  if [[ "$*" == *FSTYPE ]]; then
-    if [[ "$*" == *'/mnt/boot'* ]]; then printf '%s\n' "${BOOT_TYPE:-vfat}";
-    else printf 'ext4\n'; fi
-  elif [[ "$*" == *'/mnt/boot'* ]]; then printf '%s\n' "${BOOT_DEVICE:-/dev/vda1}";
-  else printf '/dev/vda2\n'; fi
-}
-verify_mounts
-'''
-        self.assertEqual(self.run_gate(body, disk=disk).returncode, 0)
-        for fault in ('BOOT_TYPE=ext4', 'BOOT_DEVICE=/dev/sdb1'):
-            self.assertNotEqual(self.run_gate(fault + '\n' + body, disk=disk).returncode, 0)
+    def test_holder_inspection_failures_and_active_holders(self):
+        for fault in (
+            'real_check_holders /definitely-missing-holder-directory',
+            'find() { return 1; }; real_check_holders "$HOLDER_DIR"',
+            'find() { echo occupied; }; real_check_holders "$HOLDER_DIR"',
+        ):
+            result = self.run_gate(fault)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn('holder', result.stderr.lower())
+        self.assertEqual(self.run_gate('real_check_holders "$HOLDER_DIR"').returncode, 0)
 
     def test_mount_directory_must_be_empty_unmounted_and_not_symlink(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -417,7 +424,7 @@ eval "$(declare -f check_mount_directory | sed '1s/check_mount_directory/real_ch
 class DisposableTests(unittest.TestCase):
     run_gate = SetupTests.run_gate
 
-    def run_disposable(self, body, *, disk=None, table=None, swaps='', answer=None, identities=None):
+    def run_disposable(self, body, *, disk=None, table=None, swaps='', answer=None, identities=None, production=False):
         mocks = r'''
 target=disposable
 disk=/dev/disk/by-id/usb-DISPOSABLE_TEST_ONLY
@@ -472,7 +479,7 @@ findmnt() {
 sfdisk() { echo "$TABLE"; }
 blkid() { case "${*: -1}" in /dev/sdz1) echo vfat ;; /dev/sdz2) echo btrfs ;; *) return 1 ;; esac; }
 btrfs() { printf 'ID 256 gen 1 top level 5 path @root\nID 257 gen 1 top level 5 path @home\nID 258 gen 1 top level 5 path @nix\n'; }
-find() { :; }
+find() { if [[ "${1:-}" == "$HOLDER_DIR" ]]; then command find "$@"; fi; }
 check_mount_directory() { :; }
 require_root() { :; }
 require_terminal() { :; }
@@ -485,12 +492,149 @@ nixos-install() { die 'UNEXPECTED install'; }
 nixos-enter() { die 'UNEXPECTED chroot'; }
 set_password() { die 'UNEXPECTED passwd'; }
 '''
-        return self.run_gate(mocks + '\n' + body, plan=TEST_PLAN,
+        if production:
+            mocks = mocks.replace('/dev/nvme0n1p2', '/dev/sdy2').replace('/dev/nvme0n1p1', '/dev/sdy1').replace('/dev/nvme0n1', '/dev/sdy')
+            for n in (1, 2, 3):
+                mocks = mocks.replace(f'/dev/sdz{n}', f'/dev/nvme0n1p{n}')
+            mocks = mocks.replace('/dev/sdz', '/dev/nvme0n1').replace('target=disposable', 'target=nixos-desktop')
+            mocks = mocks.replace('disk=/dev/disk/by-id/usb-DISPOSABLE_TEST_ONLY', 'disk=$DESKTOP_DISK')
+            mocks = mocks.replace('"$DESKTOP_DISK") echo /dev/sdy', '"$DESKTOP_DISK") echo /dev/nvme0n1')
+            disk = copy.deepcopy(DESKTOP_DISK) if disk is None else disk
+            if identities is None:
+                identities = [{'path': f'/dev/nvme0n1p{n}', 'partlabel': label}
+                              for n, label in ((1, 'disk-main-ESP'), (2, 'disk-main-root'))]
+        return self.run_gate(mocks + '\n' + body, plan=DESKTOP_PLAN if production else TEST_PLAN,
                              disk=TEST_DISK if disk is None else disk, swaps=swaps,
                              extra_env={'TABLE': json.dumps(TEST_TABLE if table is None else table),
                                         'IDENTITIES': json.dumps({'blockdevices': identities if identities is not None else [
                                             {'path': '/dev/sdz1', 'partlabel': 'disk-main-ESP'},
                                             {'path': '/dev/sdz2', 'partlabel': 'disk-main-root'}]})}, answer=answer)
+
+    def run_production_install(self, fault='', *, disk=None):
+        # Keep real plan/disk/ancestry/busy/partition/mount validation. Only
+        # hardware commands and destructive/install/password boundaries are mocked.
+        disk = copy.deepcopy(DESKTOP_DISK) if disk is None else disk
+        disk['blockdevices'][0]['children'] = [
+            dict(path=f'/dev/nvme0n1p{n}', kname=f'fixture-part{n}', type='part', mountpoints=[None])
+            for n in (1, 2)]
+        body = r'''
+check=false
+phase=preflight
+friendly=desktop
+snapshot=path:/nix/store/fixture-source
+is_uefi() { :; }
+partition_identity_exists() { :; }
+# Give real /mnt inspection an empty temporary directory rather than touching /mnt.
+eval "$(declare -f find | sed '1s/find/fixture_find/')"
+find() { if [[ "${1:-}" == "$HOLDER_DIR"* ]]; then command find "$@"; else fixture_find "$@"; fi; }
+# Source the original check (the disposable harness mocks it).
+eval "$(sed -n '/^check_mount_directory() {/,/^}/p' "$SETUP" | sed '1s/check_mount_directory/real_mount_directory/')"
+check_mount_directory() { real_mount_directory "$HOLDER_DIR"; }
+build_disko() { echo EVENT:build; }
+run_disko() { echo EVENT:disko; }
+nixos-install() {
+  [[ "$*" == *'--root /mnt --flake path:/nix/store/fixture-source#nixos-desktop'* ]] || return 99
+  echo EVENT:install
+}
+set_password() { echo EVENT:passwd; }
+# Boot file and installed-user checks are simulated; mount verification is real.
+verify_installation() { verify_mounts; echo EVENT:verified; }
+'''
+        body += fault + r'''
+validate_plan
+require_uefi
+probe_disk
+install_target
+'''
+        return self.run_disposable(body, disk=disk, production=True,
+                                   answer=f'ERASE {DESKTOP_DEVICE}\n')
+
+    def test_production_btrfs_install_validation_and_order(self):
+        result = self.run_production_install()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        events = [line[line.index('EVENT:'):] for line in result.stdout.splitlines() if 'EVENT:' in line]
+        self.assertEqual(events, ['EVENT:lock', 'EVENT:build', 'EVENT:disko',
+                                  'EVENT:install', 'EVENT:verified', 'EVENT:passwd', 'EVENT:verified'])
+
+    def test_production_safety_failures_prevent_disko(self):
+        faults = [
+            'find() { return 1; }',
+            'check_holders() { real_check_holders /missing-holders; }',
+            'swapon() { echo /dev/nvme0n1p2; }',
+            'lsblk() { return 1; }',
+            r'''eval "$(declare -f findmnt | sed '1s/findmnt/original_findmnt/')"
+findmnt() { if [[ "$*" == *'--mountpoint / --output SOURCE'* ]]; then echo /dev/nvme0n1p2; else original_findmnt "$@"; fi; }''',
+        ]
+        for fault in faults:
+            result = self.run_production_install(fault)
+            self.assertNotEqual(result.returncode, 0, result.stdout)
+            self.assertNotIn('EVENT:disko', result.stdout)
+            self.assertNotIn('EVENT:install', result.stdout)
+        for change in ({'serial': 'wrong'}, {'mountpoints': ['/']}):
+            disk = copy.deepcopy(DESKTOP_DISK)
+            disk['blockdevices'][0].update(change)
+            result = self.run_production_install(disk=disk)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertNotIn('EVENT:disko', result.stdout)
+
+    def test_production_distinct_partitions_cannot_share_identity(self):
+        fault = r'''
+eval "$(declare -f readlink | sed '1s/readlink/original_readlink/')"
+readlink() { if [[ "${*: -1}" == /dev/disk/by-partlabel/disk-main-ESP ]]; then echo /dev/nvme0n1p2; else original_readlink "$@"; fi; }
+'''
+        result = self.run_production_install(fault)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('Filesystem targets resolve to the same device', result.stderr)
+        self.assertNotIn('EVENT:disko', result.stdout)
+
+    def test_production_live_root_disk_is_refused(self):
+        fault = r'''
+eval "$(declare -f findmnt | sed '1s/findmnt/original_findmnt/')"
+eval "$(declare -f lsblk | sed '1s/lsblk/original_lsblk/')"
+findmnt() { if [[ "$*" == *'--mountpoint / --output SOURCE'* ]]; then echo /dev/nvme0n1p2; else original_findmnt "$@"; fi; }
+lsblk() {
+  if [[ "$*" == *--inverse* ]]; then
+    echo '{"blockdevices":[{"path":"/dev/nvme0n1p2","type":"part","children":[{"path":"/dev/nvme0n1","type":"disk"}]}]}'
+  else original_lsblk "$@"; fi
+}
+'''
+        result = self.run_production_install(fault)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('Selected target is the live-root disk', result.stderr)
+        self.assertNotIn('EVENT:disko', result.stdout)
+
+    def test_production_bad_mounts_prevent_install_and_password(self):
+        changes = [
+            ('/mnt/home', '.filesystems[0].fsroot = "/@root"'),
+            ('/mnt/nix', '.filesystems[0].source = "/dev/sdy2"'),
+            ('/mnt', '.filesystems[0].options = "rw,noatime"'),
+            ('/mnt/home', '.filesystems[0].options = "rw,compress=zstd"'),
+            ('/mnt/boot', '.filesystems[0].options = "rw,fmask=0022,dmask=0022"'),
+            ('/mnt/boot', '.filesystems[0]["maj:min"] = "8:242"'),
+            ('/mnt/nix', '.filesystems = []'),
+        ]
+        for mount, change in changes:
+            fault = r'''eval "$(declare -f findmnt | sed '1s/findmnt/original_findmnt/')"
+findmnt() {
+  local output
+  output=$(original_findmnt "$@") || return
+''' + f'  if [[ "$*" == *"--mountpoint {mount} --output"* ]]; then jq \'{change}\' <<<"$output"; else printf "%s\\n" "$output"; fi; }}'
+            result = self.run_production_install(fault)
+            self.assertNotEqual(result.returncode, 0, (mount, result.stdout))
+            self.assertIn('EVENT:disko', result.stdout)
+            self.assertNotIn('EVENT:install', result.stdout)
+            self.assertNotIn('EVENT:passwd', result.stdout)
+
+    def test_live_root_inventory_must_contain_root_and_disk(self):
+        for tree in ({'blockdevices': []}, {}, {'blockdevices': [{'path': '/dev/nvme0n1', 'type': 'disk'}]},
+                     {'blockdevices': [{'path': '/dev/sdy', 'type': 'disk', 'children': [{'path': '/dev/nvme0n1p2', 'type': 'part'}]}]}):
+            fault = r'''eval "$(declare -f lsblk | sed '1s/lsblk/original_lsblk/')"
+lsblk() { if [[ "$*" == *--tree* && "${*: -1}" == /dev/nvme0n1 ]]; then printf '%s\n' ''' + "'" + json.dumps(tree) + "'" + r'''; else original_lsblk "$@"; fi; }
+disposable_identity
+'''
+            result = self.run_disposable(fault)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn('live-root disk tree', result.stderr)
 
     def test_partition_aliases_deduplicate_for_both_filesystems(self):
         identities = [
