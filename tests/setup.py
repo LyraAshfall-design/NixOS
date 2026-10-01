@@ -3,6 +3,7 @@
 import copy
 import json
 import os
+import shlex
 from pathlib import Path
 import subprocess
 import tempfile
@@ -229,12 +230,11 @@ set_password() { die 'UNEXPECTED password'; }
                 plan['swapDevices'] = ['/swapfile']
             self.assertNotEqual(self.run_desktop(plan=plan).returncode, 0)
 
-    def test_desktop_install_is_disabled_even_with_valid_identity_and_plan(self):
+    def test_desktop_install_requires_privilege_before_preflight(self):
         self.assertEqual(self.run_desktop().returncode, 0)
         result = self.run_desktop(install=True)
         self.assertNotEqual(result.returncode, 0)
-        self.assertIn('destructive desktop installation is not yet enabled', result.stderr)
-        self.assertNotIn('UNEXPECTED', result.stderr)
+        self.assertIn('UNEXPECTED root check', result.stderr)
 
     def test_duplicate_partition_identities(self):
         for identity in ('label', 'device', 'both', 'filesystemDevice'):
@@ -344,7 +344,6 @@ set_password() { die 'UNEXPECTED password'; }
         with tempfile.TemporaryDirectory() as tmp:
             body = r'''
 select_host() { [[ "$1" == fixture ]] || return 1; target=fixture-host; }
-require_install_enabled() { :; }
 validate_plan() { disk=$(jq -er ".disks[0].device" <<<"$plan"); }
 require_root() { :; }
 require_terminal() { :; }
@@ -540,14 +539,90 @@ set_password() { echo EVENT:passwd; }
 # Boot file and installed-user checks are simulated; mount verification is real.
 verify_installation() { verify_mounts; echo EVENT:verified; }
 '''
-        body += fault + r'''
-validate_plan
-require_uefi
-probe_disk
-install_target
-'''
+        body += r'''
+evaluate_plan() { plan=$PLAN; snapshot=path:/nix/store/fixture-source; }
+''' + fault + '\nmain desktop\n'
         return self.run_disposable(body, disk=disk, production=True,
                                    answer=f'ERASE {DESKTOP_DEVICE}\n')
+
+    def iso_fixture(self, *, change=None, media='/dev/sdy2', kind='part', prefix=''):
+        mounts = {
+            '/': dict(source='tmpfs', fstype='tmpfs'),
+            '/iso': dict(source=media, fstype='iso9660', **{'maj:min': '8:226'}),
+            '/nix/.ro-store': dict(source='/dev/loop0', fstype='squashfs', options='ro'),
+            '/nix/.rw-store': dict(source='tmpfs', fstype='tmpfs'),
+            '/nix/store': dict(source='overlay', fstype='overlay',
+                options=f'rw,lowerdir={prefix}/nix/.ro-store,upperdir={prefix}/nix/.rw-store/store,workdir={prefix}/nix/.rw-store/work'),
+        }
+        for target, info in mounts.items():
+            info.update(target=target, fsroot='/')
+            info.setdefault('options', 'rw')
+        if change:
+            path, fields = change
+            mounts[path].update(fields)
+        parent = '/dev/sdy' if kind == 'part' else media
+        ancestor = dict(path=media, type=kind)
+        tree = dict(path=parent, type='rom' if kind == 'rom' else 'disk')
+        if kind == 'part':
+            ancestor['children'] = [dict(path=parent, type='disk')]
+            tree['children'] = [dict(path=media, type='part')]
+        return ('ISO_MOUNTS=' + shlex.quote(json.dumps(mounts)) + '\n' +
+                'ISO_ANCESTORS=' + shlex.quote(json.dumps({'blockdevices': [ancestor]})) + '\n' +
+                'ISO_TREE=' + shlex.quote(json.dumps({'blockdevices': [tree]})) + '\n' + r'''
+eval "$(declare -f findmnt | sed '1s/findmnt/non_iso_findmnt/')"
+eval "$(declare -f lsblk | sed '1s/lsblk/non_iso_lsblk/')"
+findmnt() {
+  if [[ "$*" == *'--mountpoint / --output SOURCE'* ]]; then echo tmpfs; return; fi
+  local previous='' mp='' argument
+  for argument in "$@"; do
+    [[ "$previous" != --mountpoint ]] || mp=$argument
+    previous=$argument
+  done
+  case "$mp" in
+    /|/iso|/nix/.ro-store|/nix/.rw-store|/nix/store)
+      jq --arg mp "$mp" '{filesystems:[.[$mp]]}' <<<"$ISO_MOUNTS" ;;
+    *) non_iso_findmnt "$@" ;;
+  esac
+}
+lsblk() {
+  if [[ "$*" == *--inverse* ]]; then echo "$ISO_ANCESTORS";
+  elif [[ "$*" == *'--output PATH,TYPE --'* && "${*: -1}" == "''' + parent + r'''" ]]; then echo "$ISO_TREE";
+  else non_iso_lsblk "$@"; fi
+}
+losetup() { echo '{"loopdevices":[{"name":"/dev/loop0","back-maj:min":"8:226"}]}'; }
+''')
+
+    def test_graphical_iso_main_install_sequence(self):
+        for media, kind in (('/dev/sdy2', 'part'), ('/dev/sdy', 'disk'), ('/dev/sr0', 'rom')):
+            for prefix in ('', '/sysroot', '/mnt-root'):
+                result = self.run_production_install(self.iso_fixture(media=media, kind=kind, prefix=prefix))
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertIn('EVENT:install', result.stdout)
+                self.assertIn('EVENT:passwd', result.stdout)
+
+    def test_iso_unknown_layouts_and_inspection_failures_stop_before_disko(self):
+        changes = [('/', {'fstype': 'overlay'}), ('/iso', {'fstype': 'tmpfs'}),
+                   ('/iso', {'source': '/dev/loop1'}), ('/nix/.ro-store', {'fstype': 'ext4'}),
+                   ('/nix/.rw-store', {'fstype': 'ext4'}),
+                   ('/nix/store', {'options': 'lowerdir=/other,upperdir=/other,workdir=/other'})]
+        faults = [self.iso_fixture(change=c) for c in changes]
+        faults += [self.iso_fixture() + '\n' + fault for fault in (
+            'losetup() { return 1; }',
+            'losetup() { echo \'{"loopdevices":[]}\'; }',
+            'losetup() { echo \'{"loopdevices":[{"name":"/dev/loop0","back-maj:min":"259:2"}]}\'; }',
+            'findmnt() { return 1; }',
+            'readlink() { return 1; }',
+        )]
+        for fault in faults:
+            result = self.run_production_install(fault)
+            self.assertNotEqual(result.returncode, 0, result.stdout)
+            self.assertNotIn('EVENT:disko', result.stdout)
+
+    def test_iso_media_cannot_be_the_install_target(self):
+        result = self.run_production_install(self.iso_fixture(media='/dev/nvme0n1', kind='disk'))
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('Selected target is the live-root disk', result.stderr)
+        self.assertNotIn('EVENT:disko', result.stdout)
 
     def test_production_btrfs_install_validation_and_order(self):
         result = self.run_production_install()
@@ -712,9 +787,8 @@ verify_disposable
             disk['blockdevices'][0].update(change)
             self.assertNotEqual(self.run_disposable('disposable_identity', disk=disk).returncode, 0)
         # An arbitrary environment value is never an override in the ordinary path.
-        result = self.run_gate('TEST_DEVICE=/dev/sdz; main desktop', plan=DESKTOP_PLAN)
-        self.assertNotEqual(result.returncode, 0)
-        self.assertIn('destructive desktop installation is not yet enabled', result.stderr)
+        result = self.run_gate('TEST_DEVICE=/dev/sdz; validate_plan; [[ "$disk" == "$DESKTOP_DISK" ]]', plan=DESKTOP_PLAN)
+        self.assertEqual(result.returncode, 0, result.stderr)
         result = self.run_gate('main --test-disko vm /dev/sdz')
         self.assertNotEqual(result.returncode, 0)
 

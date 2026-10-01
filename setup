@@ -13,7 +13,7 @@ Usage: ./setup [--check] <host>
        ./setup --verify-disko desktop /dev/disk/by-id/<DISPOSABLE-DISK>
        ./setup --help
 
-  desktop  nixos-desktop: review-only Btrfs layout; --check only, never install
+  desktop  nixos-desktop: reviewed SSD, GPT/ESP/Btrfs; installation ERASES it
   laptop   not implemented
 
 Run installation as root from a NixOS live installer with an interactive terminal.
@@ -48,10 +48,6 @@ is_uefi() { [[ -d /sys/firmware/efi ]]; }
 require_uefi() { is_uefi || die 'Boot the live installer in UEFI mode.'; }
 is_block_device() { [[ -b "$1" ]]; }
 partition_identity_exists() { [[ -e "$1" || -L "$1" ]]; }
-
-require_install_enabled() {
-  die 'Desktop Disko configuration is defined and checkable, but destructive desktop installation is not yet enabled. Run ./setup --check desktop and complete final backup/layout review first.'
-}
 
 evaluate_plan() {
   # Include deliberately unstaged layout files without updating inputs.
@@ -213,33 +209,74 @@ check_mount_directory() {
   fi
 }
 
+# Recognize only the official ISO's tmpfs/iso9660/squashfs/overlay topology.
+# copytoram, network boot and loop-backed ISO images are deliberately unsupported.
+live_iso_source() {
+  local mounts='[]' mp info media loop_device loop_info media_id
+  command -v losetup >/dev/null || die 'Missing losetup for live-ISO inspection.'
+  for mp in / /iso /nix/.ro-store /nix/.rw-store /nix/store; do
+    info=$(findmnt --json --nofsroot --mountpoint "$mp" --output TARGET,SOURCE,FSTYPE,FSROOT,OPTIONS,MAJ:MIN) || die "Cannot inspect live-ISO mount: $mp"
+    jq -e --arg mp "$mp" '(.filesystems | type == "array" and length == 1) and
+      (.filesystems[0] | .target == $mp and .fsroot == "/" and
+      (.source | type == "string") and (.options | type == "string"))' <<<"$info" >/dev/null || die "Ambiguous live-ISO mount: $mp"
+    mounts=$(jq --argjson info "$info" '. + $info.filesystems' <<<"$mounts") || die 'Cannot collect live-ISO mounts.'
+  done
+  jq -e '
+    .[0].fstype == "tmpfs" and
+    .[1].fstype == "iso9660" and (.[1].source | startswith("/dev/")) and
+    (.[1]["maj:min"] | test("^[0-9]+:[0-9]+$")) and
+    .[2].fstype == "squashfs" and (.[2].options | split(",") | index("ro") != null) and
+    .[3].fstype == "tmpfs" and .[4].fstype == "overlay" and
+    (.[4].options | split(",") | . as $opts |
+      any(["", "/sysroot", "/mnt-root"][]; . as $prefix |
+        ($opts | index("lowerdir=" + $prefix + "/nix/.ro-store")) != null and
+        ($opts | index("upperdir=" + $prefix + "/nix/.rw-store/store")) != null and
+        ($opts | index("workdir=" + $prefix + "/nix/.rw-store/work")) != null))
+  ' <<<"$mounts" >/dev/null || die 'Unsupported live-ISO topology (copytoram/custom layouts refused).'
+  media=$(jq -er '.[1].source' <<<"$mounts") || die 'Missing ISO media source.'
+  media_id=$(jq -er '.[1]["maj:min"]' <<<"$mounts") || die 'Missing ISO media identity.'
+  loop_device=$(readlink -e -- "$(jq -er '.[2].source' <<<"$mounts")") || die 'Cannot resolve live squashfs loop.'
+  [[ "$loop_device" =~ ^/dev/loop[0-9]+$ ]] || die 'Unsupported live squashfs device.'
+  # Read-only loop metadata proves squashfs is backed by this mounted ISO,
+  # rather than an unrelated disk hidden behind the RAM-backed root.
+  loop_info=$(losetup --list --json --output NAME,BACK-MAJ:MIN -- "$loop_device") || die 'Cannot inspect live squashfs backing device.'
+  jq -e --arg loop "$loop_device" --arg id "$media_id" '
+    (.loopdevices | type == "array" and length == 1) and
+    .loopdevices[0].name == $loop and .loopdevices[0]["back-maj:min"] == $id
+  ' <<<"$loop_info" >/dev/null || die 'Live squashfs backing device does not match ISO media.'
+  printf '%s\n' "$media"
+}
+
 check_live_root_separation() {
-  local root_source root_resolved ancestors live_disk live_tree
-  # Explicit plain partition-backed live-root check. Refuse an
-  # unresolvable root (e.g. overlay/live ISO) instead of guessing it is safe.
+  local root_source root_resolved ancestors live_disk live_tree iso=false
+  # Protect either a partition-backed root or the explicitly verified ISO media.
   # findmnt reports the actual partition source; /dev/block/<major>:<minor>
   # is not a portable pathname and was the cause of the previous false refusal.
   root_source=$(findmnt --noheadings --raw --nofsroot --mountpoint / --output SOURCE) || die 'Cannot identify live root.'
-  [[ "$root_source" == /dev/* ]] || die 'Live root is not a plain block-device source; disposable test refused.'
+  if [[ "$root_source" != /dev/* ]]; then
+    root_source=$(live_iso_source) || die 'Cannot safely identify live installation media.'
+    iso=true
+  fi
   root_resolved=$(readlink -e -- "$root_source") || die 'Cannot resolve live root source.'
   is_block_device "$root_resolved" || die 'Live root source is not an identifiable block device; disposable test refused.'
   ancestors=$(lsblk --json --inverse --paths --output PATH,TYPE -- "$root_resolved") || die 'Cannot inspect live-root ancestry.'
-  jq -e --arg root "$root_resolved" '
+  jq -e --arg root "$root_resolved" --argjson iso "$iso" '
     (.blockdevices | type == "array" and length == 1) and
-    .blockdevices[0].path == $root and .blockdevices[0].type == "part"
+    .blockdevices[0].path == $root and
+    (.blockdevices[0].type == "part" or ($iso and (.blockdevices[0].type == "disk" or .blockdevices[0].type == "rom")))
   ' <<<"$ancestors" >/dev/null || die 'Invalid live-root ancestry inventory.'
-  live_disk=$(jq -er '[.blockdevices[] | recurse(.children[]?) | select(.type == "disk") | .path] |
+  live_disk=$(jq -er '[.blockdevices[] | recurse(.children[]?) | select(.type == "disk" or .type == "rom") | .path] |
     unique | if length == 1 then .[0] else error("ambiguous live-root disk") end' <<<"$ancestors") ||
     die 'Live-root disk ancestry is missing or ambiguous.'
   live_tree=$(lsblk --json --tree --paths --output PATH,TYPE -- "$live_disk") || die 'Cannot inspect live-root disk tree.'
   jq -e --arg disk "$live_disk" --arg root "$root_resolved" '
     (.blockdevices | type == "array" and length == 1) and
-    .blockdevices[0].path == $disk and .blockdevices[0].type == "disk" and
+    .blockdevices[0].path == $disk and (.blockdevices[0].type == "disk" or .blockdevices[0].type == "rom") and
     all(.blockdevices[] | recurse(.children[]?);
       (.path | type == "string" and startswith("/dev/")) and
-      (.type == "disk" or .type == "part") and
+      (.type == "disk" or .type == "part" or .type == "rom") and
       (.children == null or (.children | type == "array"))) and
-    any(.blockdevices[0].children[]?; .path == $root and .type == "part")
+    ($root == $disk or any(.blockdevices[0].children[]?; .path == $root and .type == "part"))
   ' <<<"$live_tree" >/dev/null || die 'Invalid or incomplete live-root disk tree.'
   jq -e --arg dev "$resolved" 'any(.blockdevices[] | recurse(.children[]?); .path == $dev) | not' <<<"$live_tree" >/dev/null ||
     die 'Selected target is the live-root disk or one of its partitions.'
@@ -319,7 +356,7 @@ check_unused() {
 
 show_disk() {
   if [[ "$target" == nixos-desktop ]]; then
-    printf '\nREAD-ONLY DESKTOP REVIEW: installation is disabled.\n'
+    printf '\nDESKTOP SSD: verify the identity and backups before erasure.\n'
   fi
   printf '\n========== DESTRUCTIVE INSTALLATION PLAN ==========\n'
   printf 'Host: %s\nFlake configuration: %s\nDISK TO ERASE: %s -> %s\n' "$friendly" "$target" "$disk" "$resolved"
@@ -436,7 +473,7 @@ verify_installation() {
   nixos-enter --root /mnt -c '/nix/var/nix/profiles/system/sw/bin/id corey' 9>&-
 }
 
-# Shared installation sequence; main retains both desktop refusal gates.
+# Shared installation sequence; main enforces host selection and privilege checks.
 install_target() {
   check_unused
   if "$check"; then
@@ -500,8 +537,6 @@ main() {
   (( $# == 1 )) || { usage >&2; die 'Provide exactly one host.'; }
   friendly=$1
   select_host "$friendly"
-  # This gate is independent of Disko availability, root, identity, or confirmations.
-  if ! "$check"; then require_install_enabled; fi
   if ! "$check"; then require_root; require_terminal; fi
   for command in nix jq git lsblk findmnt swapon readlink uname find flock nixos-install nixos-enter; do
     command -v "$command" >/dev/null || die "Missing required tool: $command (use a NixOS live installer)."
@@ -514,15 +549,14 @@ main() {
   require_uefi
   probe_disk
   show_disk
-  if [[ "$target" == nixos-desktop ]]; then
+  if [[ "$target" == nixos-desktop ]] && "$check"; then
     # Mounted production storage is allowed ONLY in this review-only branch.
     # Return before unused-disk checks, locking, builds, confirmations or operations.
-    "$check" || die 'Desktop installation is disabled.'
     printf '\nCurrent mounts (read-only inspection):\n'
     findmnt --real --output SOURCE,TARGET,FSTYPE,OPTIONS
     printf '\nUEFI: yes; Disko evaluates: yes. Planned fresh-install mounts:\n'
     jq '.filesystems' <<<"$plan"
-    printf '\nDESKTOP REVIEW CHECK PASSED. Production disk may be mounted. Destructive installation remains disabled; this is not erase authorization.\n'
+    printf '\nDESKTOP REVIEW CHECK PASSED. Production disk may be mounted. This is an identity/layout review, not installation readiness or erase authorization.\n'
     return
   fi
   install_target

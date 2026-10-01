@@ -8,10 +8,17 @@ repository, then inspect the plan first:
 ./setup --check desktop
 ```
 
-No host currently permits a full installation through `setup`.
-`desktop` maps to `nixos-desktop` and supports **only** `./setup --check desktop`.
-Destructive `./setup desktop` is unconditionally refused before privilege checks,
-confirmation, builds, or operations, even when the identity/layout checks pass.
+`desktop` maps to `nixos-desktop`. After completing backups and reviewing the
+non-destructive check, install from the official graphical live ISO in UEFI mode:
+
+```sh
+sudo ./setup desktop
+```
+
+This **erases the entire reviewed desktop SSD**. You must type exactly
+`ERASE /dev/disk/by-id/nvme-SIX_X7400_SSD_STX26012100037853` at the prompt.
+The command does not reboot automatically. Disconnect the disposable test USB
+before installing: its matching partition labels are intentionally rejected.
 `laptop` and `server` are not implemented. Unknown names are rejected.
 
 The desktop review checks the intentional stable path
@@ -19,7 +26,8 @@ The desktop review checks the intentional stable path
 model `SIX X7400 SSD`, serial `STX26012100037853`, and capacity 1,024,209,543,168
 bytes (953.9 GiB, tolerance ±1 GiB). Duplicate serial identities are refused.
 UEFI is required. Current partitions and mounts are displayed; mounted production
-storage is allowed for this read-only review, which returns before install gates.
+storage is allowed only for this read-only review. It does not certify installation
+readiness; installation additionally checks live-media separation and unused storage.
 
 ## Safety boundaries
 
@@ -38,7 +46,7 @@ storage is allowed for this read-only review, which returns before install gates
   layouts, and declaratively managed Corey passwords need a reviewed extension.
 - Mounted disks, active swap, block-device holders, partition-label collisions,
   and an occupied/nonempty/symlinked `/mnt` are refused. Nothing is automatically
-  unmounted or deactivated to make a disk available. These are disposable-test
+  unmounted or deactivated to make a disk available. These are installation and disposable-test
   readiness checks, not requirements for reviewing the mounted desktop SSD.
 - Failed directory/disk/mount/swap inspection is fatal. Root and EFI labels,
   partition paths, and filesystem targets must be distinct and consistent;
@@ -53,17 +61,17 @@ storage test builds that output before confirmation and invokes it with the
 pinned version's `--yes-wipe-all-disks` flag only after exact typed confirmation.
 It never installs NixOS or changes passwords.
 
-Generic installation helpers remain for a future reviewed enablement change.
-They use the immutable host snapshot, install under `/mnt`, and invoke the
+Installation uses the immutable host snapshot, verifies all four target mounts
+before `nixos-install --root /mnt`, checks bootloader/user state, and invokes the
 installed `passwd corey` interactively through `nixos-enter`. Passwords must
 never be captured in variables, logs, arguments, or temporary files. This flow
-is currently unreachable for every supported host. Its ordering and failure
-boundaries remain covered by a synthetic, non-destructive test harness.
+is covered by a synthetic, non-destructive test harness; tests never run the
+real destructive commands. After setting the password, verification runs again.
 
 On any failure, stop and inspect the reported phase. There is no automatic
 rollback, unmount, or reboot.
 
-## Review-only desktop layout
+## Fresh-install desktop layout
 
 `hosts/desktop/disko.nix` defines GPT with a 1 GiB vfat ESP at `/boot`
 (`umask=0077`) and the remaining space as Btrfs:
@@ -81,13 +89,13 @@ The old UUID mount declarations are replaced by Disko's future-install mounts.
 its top-level root and `home`/`nix` subvolumes are not `@root`/`@home`/`@nix`.
 This definition is a fresh-install plan, not an in-place data migration.
 
-Before a later reviewed change can enable destructive desktop installation:
+Before running desktop installation:
 
 1. Verify complete backups and a tested restore plan; explicitly authorize erasure.
-2. Test this Btrfs design on disposable media with a separately reviewed test target.
+2. Review the completed disposable-storage test and disconnect that test disk.
 3. Preserve the desktop policy: 50% RAM zram, no disk-backed swap or hibernation.
-4. Add Btrfs-aware install/mount validation and unused-disk checks for a live-ISO
-   environment, and re-review device identity, confirmation, and failure recovery.
+4. Boot the official graphical live ISO normally in UEFI mode and review disk identity.
+   Do not use copy-to-RAM, network boot, Ventoy, or an ISO file on a loop device.
 
 Never substitute a guessed stable ID or treat `/dev/sda`/`/dev/nvme0n1` as a
 physical-machine installation identity.
@@ -120,8 +128,9 @@ working tree without staging. This does not change the lock file or enable insta
 ## Disposable desktop layout test
 
 This is a separate, explicitly destructive **storage test**, not desktop installation.
-It never calls nixos-install, passwd, or activates a system. Normal `./setup desktop`
-remains disabled. `tests/disposable-disko.nix` extends the immutable desktop
+It never calls nixos-install, passwd, or activates a system. Unlike full
+`./setup desktop` installation, it stops after storage validation.
+`tests/disposable-disko.nix` extends the immutable desktop
 configuration and overrides only `disko.devices.disk.main.device`; the production
 definition stays fixed. The evaluated layout must otherwise match exactly.
 No environment variable selects or overrides a device.
@@ -143,9 +152,9 @@ production `/dev/nvme0n1` node, live-root disk ancestry, partitions, read-only o
 undersized disks, mounted children, swap, holders, ambiguous metadata, conflicting
 partition labels and occupied `/mnt`. Only explicit by-id whole disks resolving
 to supported physical/virtio disk nodes are accepted; loops and device-mapper
-targets are deliberately unsupported. Live-root ancestry must be resolvable to
-a block device: an overlay-root live ISO is refused rather than guessed safe.
-Use a normal installed test machine or disposable guest with a separate test disk.
+targets are deliberately unsupported. Live-root protection supports either a
+plain partition-backed installed root or the official live-ISO topology below.
+Unknown root layouts are refused rather than guessed safe.
 Identity and busy checks repeat after building and immediately after confirmation.
 
 The pinned Disko helper formats **only the selected disk**, mounts under `/mnt`,
@@ -165,5 +174,24 @@ sudo ./setup --verify-disko desktop /dev/disk/by-id/ACTUAL_DISPOSABLE_DISK_ID
 Running `--test-disko` again is not a read-only operation and will refuse the still
 mounted target. No automatic unmount or rollback occurs, on success or failure;
 inspect mount sources before manually cleaning up disposable mounts. Never change
-attached storage during the test. Host installation remains blocked pending backup,
-restore, storage-test and separate installer-enablement review.
+attached storage during the test. A successful storage test is not permission to
+erase the production disk; full installation has its own exact confirmation.
+
+## Official graphical live ISO support
+
+The supported ISO has tmpfs `/`, iso9660 `/iso`, a read-only squashfs loop at
+`/nix/.ro-store`, tmpfs `/nix/.rw-store`, and an overlay `/nix/store` with the
+standard lower/upper/work directories. The guard checks every mount, verifies
+that the squashfs loop is backed by the mounted ISO, and protects the ISO's
+whole USB disk or optical device and its children. Recognized initrd path
+prefixes are supported. All inspections repeat before erasure.
+
+Copy-to-RAM, network/PXE boot, loop/device-mapper-backed ISO media (including
+unverified multiboot arrangements), missing mounts and ambiguous ancestry are
+refused. This is deliberate; there is no force/skip flag. Source compatibility
+and mocked paths are validated; a real live-ISO installation is still a manual
+operation and is not exercised by the automated tests.
+
+If password setup fails after installation, do not erase/reinstall: inspect the
+mounted installed system and recover interactively with `nixos-enter --root /mnt`.
+After first login, clone a working copy of this repository for future maintenance.
