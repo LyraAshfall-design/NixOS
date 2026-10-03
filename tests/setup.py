@@ -545,14 +545,14 @@ evaluate_plan() { plan=$PLAN; snapshot=path:/nix/store/fixture-source; }
         return self.run_disposable(body, disk=disk, production=True,
                                    answer=f'ERASE {DESKTOP_DEVICE}\n')
 
-    def iso_fixture(self, *, change=None, media='/dev/sdy2', kind='part', prefix=''):
+    def iso_fixture(self, *, change=None, media='/dev/sdy2', kind='part', prefix='', stacked=False):
         mounts = {
             '/': dict(source='tmpfs', fstype='tmpfs'),
             '/iso': dict(source=media, fstype='iso9660', **{'maj:min': '8:226'}),
             '/nix/.ro-store': dict(source='/dev/loop0', fstype='squashfs', options='ro'),
             '/nix/.rw-store': dict(source='tmpfs', fstype='tmpfs'),
-            '/nix/store': dict(source='overlay', fstype='overlay',
-                options=f'rw,lowerdir={prefix}/nix/.ro-store,upperdir={prefix}/nix/.rw-store/store,workdir={prefix}/nix/.rw-store/work'),
+            '/nix/store': dict(source='overlay', fstype='overlay', **{'maj:min': '0:35'},
+                options=f'rw,relatime,lowerdir={prefix}/nix/.ro-store,upperdir={prefix}/nix/.rw-store/store,workdir={prefix}/nix/.rw-store/work,uuid=on'),
         }
         for target, info in mounts.items():
             info.update(target=target, fsroot='/')
@@ -560,6 +560,11 @@ evaluate_plan() { plan=$PLAN; snapshot=path:/nix/store/fixture-source; }
         if change:
             path, fields = change
             mounts[path].update(fields)
+        mounts = {path: [info] for path, info in mounts.items()}
+        if stacked:
+            readonly = copy.deepcopy(mounts['/nix/store'][0])
+            readonly['options'] = readonly['options'].replace('rw,', 'ro,nosuid,nodev,', 1)
+            mounts['/nix/store'].append(readonly)
         parent = '/dev/sdy' if kind == 'part' else media
         ancestor = dict(path=media, type=kind)
         tree = dict(path=parent, type='rom' if kind == 'rom' else 'disk')
@@ -580,7 +585,7 @@ findmnt() {
   done
   case "$mp" in
     /|/iso|/nix/.ro-store|/nix/.rw-store|/nix/store)
-      jq --arg mp "$mp" '{filesystems:[.[$mp]]}' <<<"$ISO_MOUNTS" ;;
+      jq --arg mp "$mp" '{filesystems:.[$mp]}' <<<"$ISO_MOUNTS" ;;
     *) non_iso_findmnt "$@" ;;
   esac
 }
@@ -599,6 +604,56 @@ losetup() { echo '{"loopdevices":[{"name":"/dev/loop0","back-maj:min":"8:226"}]}
                 self.assertEqual(result.returncode, 0, result.stderr)
                 self.assertIn('EVENT:install', result.stdout)
                 self.assertIn('EVENT:passwd', result.stdout)
+
+    def test_graphical_iso_stacked_store_overlay(self):
+        for prefix in ('', '/sysroot', '/mnt-root'):
+            for reverse in (False, True):
+                fixture = self.iso_fixture(stacked=True, prefix=prefix)
+                if reverse:
+                    fixture += '\nISO_MOUNTS=$(jq \'.["/nix/store"] |= reverse\' <<<"$ISO_MOUNTS")\n'
+                result = self.run_production_install(fixture)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertIn('EVENT:install', result.stdout)
+                self.assertIn('EVENT:passwd', result.stdout)
+
+    def test_stacked_overlay_ambiguity_stops_before_disko(self):
+        changes = [
+            '.["/nix/store"] = []',
+            '.["/nix/store"] += [.["/nix/store"][0]]',
+            '.["/iso"] += [.["/iso"][0]]',
+            '.["/nix/store"][1].target = "/other"',
+            '.["/nix/store"][1].fsroot = "/other"',
+            '.["/nix/store"][1].fstype = "tmpfs"',
+            '.["/nix/store"][1].source = "unrelated"',
+            '.["/nix/store"][1]["maj:min"] = "0:36"',
+            'del(.["/nix/store"][1]["maj:min"])',
+            '.["/nix/store"][1].options = .["/nix/store"][0].options',
+            '.["/nix/store"][1].options += ",rw"',
+            '.["/nix/store"][1].options += ",noexec"',
+            '.["/nix/store"][0].options += ",nosuid,nodev"',
+            '.["/nix/store"][1].options |= sub("nosuid,"; "")',
+            '.["/nix/store"][1].options |= sub("nodev,"; "")',
+            '.["/nix/store"][1].options |= sub("relatime,"; "")',
+            '.["/nix/store"][1].options |= sub(",uuid=on"; "")',
+            '.["/nix/store"][1].options |= sub("uuid=on"; "uuid=off")',
+            '.["/nix/.ro-store"] = []',
+            '.["/nix/store"][1].options |= sub("lowerdir=/nix/.ro-store"; "lowerdir=/other")',
+            '.["/nix/store"][1].options |= sub("upperdir=/nix/.rw-store/store"; "upperdir=/other")',
+            '.["/nix/store"][1].options |= sub("workdir=/nix/.rw-store/work"; "workdir=/other")',
+            '.["/nix/store"] |= map(.options |= sub("lowerdir=/nix/.ro-store"; "lowerdir=/other"))',
+        ]
+        for change in changes:
+            with self.subTest(change=change):
+                fixture = self.iso_fixture(stacked=True)
+                fixture += '\nISO_MOUNTS=$(jq ' + shlex.quote(change) + ' <<<"$ISO_MOUNTS")\n'
+                result = self.run_production_install(fixture)
+                self.assertNotEqual(result.returncode, 0, result.stdout)
+                self.assertNotIn('EVENT:disko', result.stdout)
+        for fault in ('losetup() { return 1; }',
+                      'losetup() { echo \'{"loopdevices":[{"name":"/dev/loop0","back-maj:min":"259:2"}]}\'; }'):
+            result = self.run_production_install(self.iso_fixture(stacked=True) + '\n' + fault)
+            self.assertNotEqual(result.returncode, 0, result.stdout)
+            self.assertNotIn('EVENT:disko', result.stdout)
 
     def test_iso_unknown_layouts_and_inspection_failures_stop_before_disko(self):
         changes = [('/', {'fstype': 'overlay'}), ('/iso', {'fstype': 'tmpfs'}),

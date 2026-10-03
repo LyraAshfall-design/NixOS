@@ -216,10 +216,29 @@ live_iso_source() {
   command -v losetup >/dev/null || die 'Missing losetup for live-ISO inspection.'
   for mp in / /iso /nix/.ro-store /nix/.rw-store /nix/store; do
     info=$(findmnt --json --nofsroot --mountpoint "$mp" --output TARGET,SOURCE,FSTYPE,FSROOT,OPTIONS,MAJ:MIN) || die "Cannot inspect live-ISO mount: $mp"
-    jq -e --arg mp "$mp" '(.filesystems | type == "array" and length == 1) and
-      (.filesystems[0] | .target == $mp and .fsroot == "/" and
-      (.source | type == "string") and (.options | type == "string"))' <<<"$info" >/dev/null || die "Ambiguous live-ISO mount: $mp"
-    mounts=$(jq --argjson info "$info" '. + $info.filesystems' <<<"$mounts") || die 'Cannot collect live-ISO mounts.'
+    jq -e --arg mp "$mp" '
+      (.filesystems | type == "array") and
+      all(.filesystems[]; .target == $mp and .fsroot == "/" and
+        (.source | type == "string") and (.options | type == "string")) and
+      ((.filesystems | length == 1) or
+        ($mp == "/nix/store" and (.filesystems | length == 2) and
+          all(.filesystems[]; .fstype == "overlay" and .source == "overlay" and
+            (.["maj:min"] | test("^[0-9]+:[0-9]+$"))) and
+          ([.filesystems[] | .["maj:min"]] | unique | length == 1) and
+          ([.filesystems[] | .options | split(",") |
+            map(select(. == "rw" or . == "ro"))] | sort == [["ro"], ["rw"]]) and
+          ([.filesystems[] | .options | split(",") |
+            if index("ro") != null then
+              # Only the ro view may add the observed nosuid,nodev pair.
+              if (map(select(. == "nosuid" or . == "nodev")) | sort) == ["nodev", "nosuid"]
+              then map(select(. != "nosuid" and . != "nodev"))
+              else . end
+            else . end |
+            map(select(. != "rw" and . != "ro")) | sort] | unique | length == 1)))
+    ' <<<"$info" >/dev/null || die "Ambiguous live-ISO mount: $mp"
+    # The official graphical ISO may expose the same store overlay twice,
+    # once rw and once ro. Collapse only the validated pair for topology checks.
+    mounts=$(jq --argjson info "$info" '. + [$info.filesystems[0]]' <<<"$mounts") || die 'Cannot collect live-ISO mounts.'
   done
   jq -e '
     .[0].fstype == "tmpfs" and
